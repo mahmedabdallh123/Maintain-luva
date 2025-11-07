@@ -724,5 +724,5 @@ def main():
 
 # التشغيل الرئيسي للتطبيق
 
-  if _name_ == "_main_":
-             main()
+   if _name_ == "_main_":
+       main()

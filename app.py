@@ -21,14 +21,14 @@ except Exception:
 # ===============================
 APP_CONFIG = {
     # إعدادات التطبيق العامة
-    "APP_TITLE": "نظام إدارة صيانه المحطات",
+    "APP_TITLE": "نظام إدارة محطات الإنتاج",
     "APP_ICON": "🏭",
     
     # إعدادات GitHub
-    "REPO_NAME": "mahmedabdallh123/Maintain-luva",
+    "REPO_NAME": "mahmedabdallh123/luva",
     "BRANCH": "main",
-    "PRODUCTION_FILE_PATH": "station.xlsx",
-    "LOCAL_PRODUCTION_FILE": "station.xlsx",
+    "PRODUCTION_FILE_PATH": "production_data.xlsx",
+    "LOCAL_PRODUCTION_FILE": "production_data.xlsx",
     
     # إعدادات الأمان
     "MAX_ACTIVE_USERS": 5,
@@ -222,24 +222,14 @@ def login_ui():
 def fetch_production_from_github():
     """تحميل ملف الإنتاج من GitHub"""
     try:
-        # إنشاء ملف مؤقت للتحميل
-        temp_file = "temp_production_data.xlsx"
-        
         response = requests.get(PRODUCTION_GITHUB_URL, stream=True, timeout=30)
         response.raise_for_status()
         
-        with open(temp_file, "wb") as f:
+        with open(APP_CONFIG["LOCAL_PRODUCTION_FILE"], "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
         
-        # إذا كان التحميل ناجحاً، انقل الملف إلى الموقع الدائم
-        if os.path.exists(temp_file):
-            if os.path.exists(APP_CONFIG["LOCAL_PRODUCTION_FILE"]):
-                os.remove(APP_CONFIG["LOCAL_PRODUCTION_FILE"])
-            os.rename(temp_file, APP_CONFIG["LOCAL_PRODUCTION_FILE"])
-        
-        # مسح الكاش
         try:
             st.cache_data.clear()
         except:
@@ -247,9 +237,6 @@ def fetch_production_from_github():
             
         return True
     except Exception as e:
-        # إذا فشل التحميل، احذف الملف المؤقت إذا كان موجوداً
-        if os.path.exists("temp_production_data.xlsx"):
-            os.remove("temp_production_data.xlsx")
         st.error(f"⚠ فشل التحديث من GitHub: {str(e)}")
         return False
 
@@ -260,7 +247,6 @@ def fetch_production_from_github():
 def load_production_data():
     """تحميل بيانات محطات الإنتاج"""
     if not os.path.exists(APP_CONFIG["LOCAL_PRODUCTION_FILE"]):
-        st.warning("⚠ لم يتم العثور على ملف الإنتاج. يرجى تحديث الملف من GitHub.")
         return {}
     
     try:
@@ -316,7 +302,6 @@ def save_production_data(sheets_data, commit_message="تحديث بيانات م
             for sheet_name, df in sheets_data.items():
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
         
-        # امسح الكاش
         try:
             st.cache_data.clear()
         except:
@@ -733,3 +718,7 @@ def main():
             - يمكن عرض وتعديل أي شيت تلقائياً
             - في حالة وجود أي مشاكل، يرجى التواصل مع الدعم الفني
             """)
+
+# التشغيل الرئيسي للتطبيق
+if _name_ == "_main_":
+    main()

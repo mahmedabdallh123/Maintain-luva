@@ -25,10 +25,10 @@ APP_CONFIG = {
     "APP_ICON": "🏭",
     
     # إعدادات GitHub
-    "REPO_NAME": "mahmedabdallh123/luva",
+    "REPO_NAME": "mahmedabdallh123/Maintain-luva",
     "BRANCH": "main",
-    "PRODUCTION_FILE_PATH": "production_data.xlsx",
-    "LOCAL_PRODUCTION_FILE": "production_data.xlsx",
+    "PRODUCTION_FILE_PATH": "station.xlsx",
+    "LOCAL_PRODUCTION_FILE": "station.xlsx",
     
     # إعدادات الأمان
     "MAX_ACTIVE_USERS": 5,
@@ -719,3 +719,6 @@ def main():
             - في حالة وجود أي مشاكل، يرجى التواصل مع الدعم الفني
             """)
 
+# التشغيل الرئيسي للتطبيق
+if _name_ == "_main_":
+    main()

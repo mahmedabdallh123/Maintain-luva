@@ -25,17 +25,17 @@ APP_CONFIG = {
     "APP_ICON": "🏭",
     
     # إعدادات GitHub
-    "REPO_NAME": "mahmedabdallh123/Maintain-luva",
+    "REPO_NAME": "mahmedabdallh123/luva",
     "BRANCH": "main",
-    "PRODUCTION_FILE_PATH": "station.xlsx",
-    "LOCAL_PRODUCTION_FILE": "station.xlsx",
+    "PRODUCTION_FILE_PATH": "production_data.xlsx",  # ملف محطات الإنتاج
+    "LOCAL_PRODUCTION_FILE": "production_data.xlsx",
     
     # إعدادات الأمان
     "MAX_ACTIVE_USERS": 5,
-    "SESSION_DURATION_MINUTES": 120,
+    "SESSION_DURATION_MINUTES": 11,
     
     # إعدادات الواجهة
-    "SHOW_TECH_SUPPORT_TO_ALL": True,
+    "SHOW_TECH_SUPPORT_TO_ALL": False,
     "CUSTOM_TABS": ["📊 عرض المحطات", "✏ تعديل البيانات", "📈 الإحصائيات", "👥 إدارة المستخدمين", "📞 الدعم الفني"]
 }
 
@@ -67,7 +67,7 @@ def load_users():
                 "password": "12345", 
                 "role": "data_entry", 
                 "created_at": datetime.now().isoformat(),
-                "permissions": ["data_entry", "view_stats"]
+                "permissions": ["data_entry"]
             }
         }
         with open(USERS_FILE, "w", encoding="utf-8") as f:
@@ -75,12 +75,12 @@ def load_users():
         return default_users
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
-            users = json.load(f)
-            return users
+            return json.load(f)
     except Exception as e:
         st.error(f"❌ خطأ في ملف users.json: {e}")
         return {
-            "admin": {"password": "1111", "role": "admin", "permissions": ["all"], "created_at": datetime.now().isoformat()}
+            "admin": {"password": "1111", "role": "admin", "permissions": ["all"], "created_at": datetime.now().isoformat()},
+            "user1": {"password": "12345", "role": "data_entry", "permissions": ["data_entry"], "created_at": datetime.now().isoformat()}
         }
 
 def save_users(users):
@@ -151,11 +151,9 @@ def logout_action():
         state[username]["active"] = False
         state[username].pop("login_time", None)
         save_state(state)
-    
-    for key in list(st.session_state.keys()):
-        if key != "rerun":
-            st.session_state.pop(key)
-    
+    keys = list(st.session_state.keys())
+    for k in keys:
+        st.session_state.pop(k, None)
     st.rerun()
 
 # -------------------------------
@@ -164,7 +162,6 @@ def logout_action():
 def login_ui():
     users = load_users()
     state = cleanup_sessions(load_state())
-    
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
         st.session_state.username = None
@@ -183,13 +180,14 @@ def login_ui():
     if not st.session_state.logged_in:
         if st.button("تسجيل الدخول"):
             if username_input in users and users[username_input]["password"] == password:
-                if username_input in active_users and username_input != "admin":
+                if username_input == "admin":
+                    pass
+                elif username_input in active_users:
                     st.warning("⚠ هذا المستخدم مسجل دخول بالفعل.")
                     return False
-                elif active_count >= MAX_ACTIVE_USERS and username_input != "admin":
+                elif active_count >= MAX_ACTIVE_USERS:
                     st.error("🚫 الحد الأقصى للمستخدمين المتصلين حالياً.")
                     return False
-                
                 state[username_input] = {"active": True, "login_time": datetime.now().isoformat()}
                 save_state(state)
                 st.session_state.logged_in = True
@@ -222,31 +220,27 @@ def login_ui():
 def fetch_production_from_github():
     """تحميل ملف الإنتاج من GitHub"""
     try:
-        response = requests.get(PRODUCTION_GITHUB_URL, stream=True, timeout=30)
+        response = requests.get(PRODUCTION_GITHUB_URL, stream=True, timeout=15)
         response.raise_for_status()
-        
         with open(APP_CONFIG["LOCAL_PRODUCTION_FILE"], "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        
+            shutil.copyfileobj(response.raw, f)
         try:
             st.cache_data.clear()
         except:
             pass
-            
         return True
     except Exception as e:
-        st.error(f"⚠ فشل التحديث من GitHub: {str(e)}")
+        st.error(f"⚠ فشل التحديث من GitHub: {e}")
         return False
 
 # -------------------------------
 # 📂 تحميل البيانات
 # -------------------------------
-@st.cache_data(show_spinner=False, ttl=300)
+@st.cache_data(show_spinner=False)
 def load_production_data():
     """تحميل بيانات محطات الإنتاج"""
     if not os.path.exists(APP_CONFIG["LOCAL_PRODUCTION_FILE"]):
+        st.warning("⚠ لم يتم العثور على ملف الإنتاج. سيتم إنشاء ملف جديد عند أول حفظ.")
         return {}
     
     try:
@@ -255,35 +249,18 @@ def load_production_data():
         sheets_data = {}
         
         for sheet_name in excel_file.sheet_names:
-            try:
-                df = pd.read_excel(APP_CONFIG["LOCAL_PRODUCTION_FILE"], sheet_name=sheet_name)
-                
-                # تنظيف البيانات - معالجة الأعمدة الرقمية بشكل آمن
-                for col in df.columns:
-                    if df[col].dtype == 'object':
-                        try:
-                            # محاولة تحويل الأعمدة النصية إلى رقمية إذا أمكن
-                            converted = pd.to_numeric(df[col], errors='coerce')
-                            # إذا تم تحويل أكثر من 50% من القيم بنجاح، استخدم الأعمدة الرقمية
-                            if converted.notna().sum() > len(df) * 0.5:
-                                df[col] = converted
-                        except:
-                            pass
-                
-                sheets_data[sheet_name] = df
-            except Exception as e:
-                st.error(f"❌ خطأ في تحميل شيت {sheet_name}: {str(e)}")
-                continue
+            df = pd.read_excel(APP_CONFIG["LOCAL_PRODUCTION_FILE"], sheet_name=sheet_name)
+            sheets_data[sheet_name] = df
         
         return sheets_data
     except Exception as e:
-        st.error(f"❌ خطأ في تحميل بيانات الإنتاج: {str(e)}")
+        st.error(f"❌ خطأ في تحميل بيانات الإنتاج: {e}")
         return {}
 
 def get_all_sheets():
     """الحصول على قائمة جميع الشيتات المتاحة"""
     sheets_data = load_production_data()
-    return list(sheets_data.keys()) if sheets_data else []
+    return list(sheets_data.keys())
 
 def get_sheet_columns(sheet_name):
     """الحصول على أعمدة شيت معين"""
@@ -302,6 +279,7 @@ def save_production_data(sheets_data, commit_message="تحديث بيانات م
             for sheet_name, df in sheets_data.items():
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
         
+        # امسح الكاش
         try:
             st.cache_data.clear()
         except:
@@ -309,16 +287,14 @@ def save_production_data(sheets_data, commit_message="تحديث بيانات م
 
         return True
     except Exception as e:
-        st.error(f"❌ خطأ في حفظ البيانات: {str(e)}")
+        st.error(f"❌ خطأ في حفظ البيانات: {e}")
         return False
 
 def update_sheet_data(sheet_name, updated_df):
     """تحديث بيانات شيت معين"""
     sheets_data = load_production_data()
-    if sheet_name in sheets_data:
-        sheets_data[sheet_name] = updated_df
-        return save_production_data(sheets_data, f"تحديث بيانات {sheet_name}")
-    return False
+    sheets_data[sheet_name] = updated_df
+    return save_production_data(sheets_data, f"تحديث بيانات {sheet_name}")
 
 # -------------------------------
 # 🧮 دوال مساعدة للنظام
@@ -337,14 +313,21 @@ def get_user_permissions(user_role, user_permissions):
             "can_input": True,
             "can_view_stats": True,
             "can_manage_users": False,
-            "can_see_tech_support": APP_CONFIG["SHOW_TECH_SUPPORT_TO_ALL"]
+            "can_see_tech_support": False
         }
-    else:  # viewer
+    elif "view_stats" in user_permissions:
         return {
             "can_input": False,
             "can_view_stats": True,
             "can_manage_users": False,
-            "can_see_tech_support": APP_CONFIG["SHOW_TECH_SUPPORT_TO_ALL"]
+            "can_see_tech_support": False
+        }
+    else:
+        return {
+            "can_input": False,
+            "can_view_stats": True,
+            "can_manage_users": False,
+            "can_see_tech_support": False
         }
 
 def generate_sheet_statistics(df, sheet_name):
@@ -357,372 +340,383 @@ def generate_sheet_statistics(df, sheet_name):
         'القيمة': [len(df), len(df.columns), df.count().sum()]
     }
     
-    # إحصائيات عددية للأعمدة الرقمية فقط
+    # إحصائيات عددية للأعمدة الرقمية
     numeric_columns = df.select_dtypes(include=['number']).columns
     if len(numeric_columns) > 0:
         for col in numeric_columns:
-            if df[col].notna().any():  # التأكد من وجود بيانات رقمية
-                stats['المعيار'].extend([f'متوسط {col}', f'أقل {col}', f'أعلى {col}', f'مجموع {col}'])
-                stats['القيمة'].extend([
-                    f"{df[col].mean():.2f}" if not pd.isna(df[col].mean()) else "N/A",
-                    f"{df[col].min():.2f}" if not pd.isna(df[col].min()) else "N/A",
-                    f"{df[col].max():.2f}" if not pd.isna(df[col].max()) else "N/A",
-                    f"{df[col].sum():.2f}" if not pd.isna(df[col].sum()) else "N/A"
-                ])
+            stats['المعيار'].extend([f'متوسط {col}', f'أقل {col}', f'أعلى {col}', f'مجموع {col}'])
+            stats['القيمة'].extend([
+                df[col].mean().round(2),
+                df[col].min(),
+                df[col].max(),
+                df[col].sum()
+            ])
     
     return pd.DataFrame(stats)
-
-def safe_numeric_filter(df, column):
-    """تصفية آمنة للأعمدة الرقمية"""
-    try:
-        # التأكد من أن العمود رقمي وأن هناك بيانات
-        if df[column].dtype in ['int64', 'float64'] and df[column].notna().any():
-            min_val = float(df[column].min())
-            max_val = float(df[column].max())
-            
-            # إذا كانت القيم كلها متشابهة، نضيف مدى صغير
-            if min_val == max_val:
-                min_val = min_val - 0.1
-                max_val = max_val + 0.1
-            
-            st.write(f"*مدى القيم في {column}:* من {min_val:.2f} إلى {max_val:.2f}")
-            
-            selected_min, selected_max = st.slider(
-                f"اختر مدى {column}:",
-                min_val, max_val, (min_val, max_val),
-                key=f"slider_{column}"
-            )
-            
-            filtered_df = df[(df[column] >= selected_min) & (df[column] <= selected_max)]
-            return filtered_df
-        else:
-            st.warning(f"العمود {column} لا يحتوي على بيانات رقمية كافية للتصفية")
-            return df
-    except Exception as e:
-        st.error(f"خطأ في التصفية: {str(e)}")
-        return df
 
 # -------------------------------
 # 🖥 الواجهة الرئيسية
 # -------------------------------
-def main():
-    print("🔥 تم دخول الدالة main()")
-    st.set_page_config(
-        page_title=APP_CONFIG["APP_TITLE"], 
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+st.set_page_config(page_title=APP_CONFIG["APP_TITLE"], layout="wide")
 
-    st.write("🚀 تم بدء تشغيل التطبيق بنجاح")  # ✅ لاختبار عمل الواجهة
-
-    # شريط تسجيل الدخول
-    with st.sidebar:
-        st.header("👤 الجلسة")
-        if not st.session_state.get("logged_in"):
-            if not login_ui():
-                return
+# شريط تسجيل الدخول
+with st.sidebar:
+    st.header("👤 الجلسة")
+    if not st.session_state.get("logged_in"):
+        if not login_ui():
+            st.stop()
+    else:
+        state = cleanup_sessions(load_state())
+        username = st.session_state.username
+        user_role = st.session_state.user_role
+        rem = remaining_time(state, username)
+        if rem:
+            mins, secs = divmod(int(rem.total_seconds()), 60)
+            st.success(f"👋 {username} | الدور: {user_role} | ⏳ {mins:02d}:{secs:02d}")
         else:
-            state = cleanup_sessions(load_state())
-            username = st.session_state.username
-            user_role = st.session_state.user_role
-            rem = remaining_time(state, username)
-            if rem:
-                mins, secs = divmod(int(rem.total_seconds()), 60)
-                st.success(f"👋 {username} | الدور: {user_role} | ⏳ {mins:02d}:{secs:02d}")
-            else:
-                logout_action()
-
-        st.markdown("---")
-        st.write("🔧 أدوات النظام:")
-        
-        if st.button("🔄 تحديث الملف من GitHub"):
-            with st.spinner("جاري تحديث البيانات..."):
-                if fetch_production_from_github():
-                    st.success("✅ تم تحديث البيانات بنجاح")
-                    st.rerun()
-                else:
-                    st.error("❌ فشل تحديث البيانات")
-        
-        if st.button("🗑 مسح الكاش"):
-            try:
-                st.cache_data.clear()
-                st.success("✅ تم مسح الكاش بنجاح")
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ خطأ في مسح الكاش: {str(e)}")
-        
-        st.markdown("---")
-        if st.button("🚪 تسجيل الخروج"):
             logout_action()
 
-    # تحميل البيانات
-    production_data = load_production_data()
-
-    # واجهة التبويبات الرئيسية
-    st.title(f"{APP_CONFIG['APP_ICON']} {APP_CONFIG['APP_TITLE']}")
-
-    # التحقق من الصلاحيات
-    username = st.session_state.get("username")
-    user_role = st.session_state.get("user_role", "viewer")
-    user_permissions = st.session_state.get("user_permissions", ["view_stats"])
-    permissions = get_user_permissions(user_role, user_permissions)
-
-    # تحديد التبويبات بناءً على الصلاحيات
-    tab_names = ["📊 عرض المحطات", "📈 الإحصائيات"]
+    st.markdown("---")
+    st.write("🔧 أدوات النظام:")
     
-    if permissions["can_input"]:
-        tab_names.insert(1, "✏ تعديل البيانات")
+    if st.button("🔄 تحديث الملف من GitHub"):
+        if fetch_production_from_github():
+            st.success("✅ تم تحديث البيانات بنجاح")
+            st.rerun()
     
-    if permissions["can_manage_users"]:
-        tab_names.append("👥 إدارة المستخدمين")
+    if st.button("🗑 مسح الكاش"):
+        try:
+            st.cache_data.clear()
+            st.success("✅ تم مسح الكاش بنجاح")
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ خطأ في مسح الكاش: {e}")
     
-    if permissions["can_see_tech_support"]:
-        tab_names.append("📞 الدعم الفني")
+    st.markdown("---")
+    if st.button("🚪 تسجيل الخروج"):
+        logout_action()
 
-    tabs = st.tabs(tab_names)
+# تحميل البيانات
+production_data = load_production_data()
 
-    # -------------------------------
-    # Tab 1: عرض المحطات
-    # -------------------------------
+# واجهة التبويبات الرئيسية
+st.title(f"{APP_CONFIG['APP_ICON']} {APP_CONFIG['APP_TITLE']}")
+
+# التحقق من الصلاحيات
+username = st.session_state.get("username")
+user_role = st.session_state.get("user_role", "viewer")
+user_permissions = st.session_state.get("user_permissions", ["view_stats"])
+permissions = get_user_permissions(user_role, user_permissions)
+
+# تحديد التبويبات بناءً على الصلاحيات
+if permissions["can_manage_users"]:
+    tabs = st.tabs(APP_CONFIG["CUSTOM_TABS"])
+elif permissions["can_input"]:
+    tabs = st.tabs(["📊 عرض المحطات", "✏ تعديل البيانات", "📈 الإحصائيات"])
+else:
+    tabs = st.tabs(["📊 عرض المحطات", "📈 الإحصائيات"])
+
+# -------------------------------
+# Tab 1: عرض المحطات
+# -------------------------------
+if len(tabs) > 0:
     with tabs[0]:
         st.header("📊 عرض بيانات المحطات")
         
         if not production_data:
-            st.warning("⚠ لا توجد بيانات متاحة. يرجى تحديث الملف من GitHub.")
+            st.warning("⚠ لا توجد بيانات متاحة. يرجى تحديث الملف من GitHub أو إضافة بيانات جديدة.")
         else:
+            # اختيار الشيت المطلوب
             available_sheets = get_all_sheets()
-            if not available_sheets:
-                st.error("❌ لا توجد شيتات متاحة في الملف")
-            else:
-                selected_sheet = st.selectbox(
-                    "📋 اختر المحطة أو القسم:",
-                    available_sheets,
-                    key="view_sheet_select"
-                )
+            selected_sheet = st.selectbox(
+                "📋 اختر المحطة أو القسم:",
+                available_sheets,
+                key="view_sheet_select"
+            )
+            
+            if selected_sheet:
+                df = production_data[selected_sheet]
                 
-                if selected_sheet:
-                    df = production_data[selected_sheet]
-                    
-                    st.subheader(f"بيانات {selected_sheet}")
-                    
-                    # عرض معلومات عن الشيت
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("عدد الصفوف", len(df))
-                    with col2:
-                        st.metric("عدد الأعمدة", len(df.columns))
-                    with col3:
-                        st.metric("إجمالي البيانات", df.count().sum())
-                    
-                    # عرض البيانات
-                    st.dataframe(df, use_container_width=True, height=400)
-                    
-                    # خيارات التصفية البسيطة
-                    st.subheader("🔍 تصفية البيانات")
-                    
+                st.subheader(f"بيانات {selected_sheet}")
+                
+                # عرض معلومات عن الشيت
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("عدد الصفوف", len(df))
+                with col2:
+                    st.metric("عدد الأعمدة", len(df.columns))
+                with col3:
+                    st.metric("إجمالي البيانات", df.count().sum())
+                
+                # عرض البيانات
+                st.dataframe(df, use_container_width=True, height=400)
+                
+                # خيارات التصفية
+                st.subheader("🔍 تصفية البيانات")
+                col1, col2 = st.columns(2)
+                
+                with col1:
                     # تصفية حسب الأعمدة النصية
                     text_columns = df.select_dtypes(include=['object']).columns
                     if len(text_columns) > 0:
-                        filter_column = st.selectbox("اختر عمود للتصفية النصية:", text_columns)
-                        unique_values = df[filter_column].dropna().unique()
-                        if len(unique_values) > 0:
-                            selected_value = st.selectbox("اختر قيمة:", unique_values)
-                            
-                            if st.button("تطبيق التصفية النصية"):
-                                filtered_df = df[df[filter_column] == selected_value]
-                                st.dataframe(filtered_df, use_container_width=True)
-                    
+                        filter_column = st.selectbox("اختر عمود للتصفية:", text_columns)
+                        unique_values = df[filter_column].unique()
+                        selected_value = st.selectbox("اختر قيمة:", unique_values)
+                        
+                        if st.button("تطبيق التصفية"):
+                            filtered_df = df[df[filter_column] == selected_value]
+                            st.dataframe(filtered_df, use_container_width=True)
+                
+                with col2:
                     # تصفية حسب الأعمدة الرقمية
                     numeric_columns = df.select_dtypes(include=['number']).columns
                     if len(numeric_columns) > 0:
-                        num_column = st.selectbox("اختر عمود رقمي للتصفية:", numeric_columns)
+                        num_filter_column = st.selectbox("اختر عمود رقمي:", numeric_columns)
+                        min_val = float(df[num_filter_column].min())
+                        max_val = float(df[num_filter_column].max())
+                        
+                        selected_min, selected_max = st.slider(
+                            f"اختر مدى {num_filter_column}:",
+                            min_val, max_val, (min_val, max_val)
+                        )
+                        
                         if st.button("تطبيق التصفية الرقمية"):
-                            filtered_df = safe_numeric_filter(df, num_column)
-                            if filtered_df is not None:
-                                st.dataframe(filtered_df, use_container_width=True)
+                            filtered_df = df[(df[num_filter_column] >= selected_min) & (df[num_filter_column] <= selected_max)]
+                            st.dataframe(filtered_df, use_container_width=True)
 
-    # -------------------------------
-    # Tab 2: تعديل البيانات
-    # -------------------------------
-    if permissions["can_input"] and "✏ تعديل البيانات" in tab_names:
-        tab_index = tab_names.index("✏ تعديل البيانات")
-        with tabs[tab_index]:
-            st.header("✏ تعديل بيانات المحطات")
+# -------------------------------
+# Tab 2: تعديل البيانات (للمستخدمين الذين لديهم صلاحية التعديل)
+# -------------------------------
+if permissions["can_input"] and len(tabs) > 1:
+    with tabs[1]:
+        st.header("✏ تعديل بيانات المحطات")
+        
+        if not production_data:
+            st.warning("⚠ لا توجد بيانات متاحة. يرجى تحديث الملف من GitHub.")
+        else:
+            # اختيار الشيت للتعديل
+            available_sheets = get_all_sheets()
+            selected_sheet = st.selectbox(
+                "📋 اختر المحطة أو القسم للتعديل:",
+                available_sheets,
+                key="edit_sheet_select"
+            )
             
-            if not production_data:
-                st.warning("⚠ لا توجد بيانات متاحة. يرجى تحديث الملف من GitHub.")
-            else:
-                available_sheets = get_all_sheets()
-                if not available_sheets:
-                    st.error("❌ لا توجد شيتات متاحة في الملف")
-                else:
-                    selected_sheet = st.selectbox(
-                        "📋 اختر المحطة أو القسم للتعديل:",
-                        available_sheets,
-                        key="edit_sheet_select"
-                    )
+            if selected_sheet:
+                df = production_data[selected_sheet]
+                
+                st.subheader(f"تعديل بيانات {selected_sheet}")
+                st.info("💡 يمكنك تعديل البيانات مباشرة في الجدول أدناه، ثم حفظ التغييرات")
+                
+                # عرض محرر البيانات
+                edited_df = st.data_editor(
+                    df,
+                    use_container_width=True,
+                    height=500,
+                    num_rows="dynamic",
+                    key=f"editor_{selected_sheet}"
+                )
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if st.button("💾 حفظ التغييرات", type="primary"):
+                        if update_sheet_data(selected_sheet, edited_df):
+                            st.success("✅ تم حفظ التغييرات بنجاح")
+                            st.rerun()
+                
+                with col2:
+                    if st.button("🔄 إعادة تحميل"):
+                        st.rerun()
+                
+                with col3:
+                    if st.button("📥 تصدير البيانات"):
+                        buffer = io.BytesIO()
+                        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                            edited_df.to_excel(writer, sheet_name=selected_sheet, index=False)
+                        
+                        st.download_button(
+                            label="تحميل كملف Excel",
+                            data=buffer.getvalue(),
+                            file_name=f"{selected_sheet}_{datetime.now().date()}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                
+                # إضافة صف جديد
+                st.subheader("➕ إضافة بيانات جديدة")
+                with st.form(f"add_row_form_{selected_sheet}"):
+                    new_row_data = {}
+                    cols = st.columns(min(4, len(df.columns)))
                     
-                    if selected_sheet:
-                        df = production_data[selected_sheet]
-                        
-                        st.subheader(f"تعديل بيانات {selected_sheet}")
-                        st.info("💡 يمكنك تعديل البيانات مباشرة في الجدول أدناه")
-                        
-                        # استخدام محرر البيانات
-                        try:
-                            edited_df = st.data_editor(
-                                df,
-                                use_container_width=True,
-                                height=400,
-                                num_rows="dynamic",
-                                key=f"editor_{selected_sheet}"
-                            )
-                            
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                if st.button("💾 حفظ التغييرات", type="primary"):
-                                    if update_sheet_data(selected_sheet, edited_df):
-                                        st.success("✅ تم حفظ التغييرات بنجاح")
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ فشل حفظ التغييرات")
-                            
-                            with col2:
-                                if st.button("🔄 إعادة تحميل"):
-                                    st.rerun()
-                            
-                        except Exception as e:
-                            st.error(f"❌ خطأ في تحرير البيانات: {str(e)}")
+                    for i, column in enumerate(df.columns):
+                        col_idx = i % 4
+                        with cols[col_idx]:
+                            if df[column].dtype in ['int64', 'float64']:
+                                new_row_data[column] = st.number_input(
+                                    f"{column}:",
+                                    value=0.0,
+                                    key=f"new_{column}_{selected_sheet}"
+                                )
+                            else:
+                                new_row_data[column] = st.text_input(
+                                    f"{column}:",
+                                    key=f"new_{column}_{selected_sheet}"
+                                )
+                    
+                    if st.form_submit_button("إضافة صف جديد"):
+                        new_df = pd.concat([edited_df, pd.DataFrame([new_row_data])], ignore_index=True)
+                        if update_sheet_data(selected_sheet, new_df):
+                            st.success("✅ تم إضافة الصف الجديد بنجاح")
+                            st.rerun()
 
-    # -------------------------------
-    # Tab الإحصائيات
-    # -------------------------------
-    stats_tab_index = tab_names.index("📈 الإحصائيات")
-    with tabs[stats_tab_index]:
+# -------------------------------
+# Tab 3: الإحصائيات
+# -------------------------------
+if len(tabs) > 2:
+    with tabs[2]:
         st.header("📈 إحصائيات المحطات")
         
         if not production_data:
             st.warning("⚠ لا توجد بيانات متاحة.")
         else:
+            # اختيار الشيت للإحصائيات
             available_sheets = get_all_sheets()
-            if not available_sheets:
-                st.error("❌ لا توجد شيتات متاحة في الملف")
+            selected_sheet = st.selectbox(
+                "📋 اختر المحطة أو القسم للإحصائيات:",
+                available_sheets,
+                key="stats_sheet_select"
+            )
+            
+            if selected_sheet:
+                df = production_data[selected_sheet]
+                
+                st.subheader(f"إحصائيات {selected_sheet}")
+                
+                # الإحصائيات الأساسية
+                stats_df = generate_sheet_statistics(df, selected_sheet)
+                if not stats_df.empty:
+                    st.dataframe(stats_df, use_container_width=True)
+                
+                # الرسوم البيانية للأعمدة الرقمية
+                numeric_columns = df.select_dtypes(include=['number']).columns
+                if len(numeric_columns) > 0:
+                    st.subheader("📊 رسوم بيانية")
+                    
+                    selected_chart_column = st.selectbox(
+                        "اختر عمود للرسم البياني:",
+                        numeric_columns
+                    )
+                    
+                    if selected_chart_column:
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.bar_chart(df[selected_chart_column])
+                        
+                        with col2:
+                            st.line_chart(df[selected_chart_column])
+                
+                # تحليل الارتباط بين الأعمدة الرقمية
+                if len(numeric_columns) > 1:
+                    st.subheader("🔗 تحليل الارتباط")
+                    correlation_matrix = df[numeric_columns].corr()
+                    st.dataframe(correlation_matrix, use_container_width=True)
+                    
+                    # رسم خريطة حرارية للارتباط
+                    try:
+                        import matplotlib.pyplot as plt
+                        import seaborn as sns
+                        
+                        fig, ax = plt.subplots(figsize=(10, 8))
+                        sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', center=0, ax=ax)
+                        st.pyplot(fig)
+                    except:
+                        st.info("⚠ لا يمكن عرض خريطة الارتباط الحرارية. تأكد من تثبيت مكتبات الرسوم البيانية.")
+
+# -------------------------------
+# Tab 4: إدارة المستخدمين (للمسؤول فقط)
+# -------------------------------
+if permissions["can_manage_users"] and len(tabs) > 3:
+    with tabs[3]:
+        st.header("👥 إدارة المستخدمين")
+        
+        users = load_users()
+        
+        # عرض المستخدمين الحاليين
+        st.subheader("📋 المستخدمين الحاليين")
+        if users:
+            user_data = []
+            for username, info in users.items():
+                user_data.append({
+                    "اسم المستخدم": username,
+                    "الدور": info.get("role", "user"),
+                    "الصلاحيات": ", ".join(info.get("permissions", [])),
+                    "تاريخ الإنشاء": info.get("created_at", "غير معروف")
+                })
+            
+            users_df = pd.DataFrame(user_data)
+            st.dataframe(users_df, use_container_width=True)
+        
+        # إضافة مستخدم جديد
+        st.subheader("➕ إضافة مستخدم جديد")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            new_username = st.text_input("اسم المستخدم الجديد:")
+        with col2:
+            new_password = st.text_input("كلمة المرور:", type="password")
+        with col3:
+            user_role = st.selectbox("الدور:", ["admin", "data_entry", "viewer"])
+        
+        if st.button("إضافة مستخدم"):
+            if not new_username.strip() or not new_password.strip():
+                st.warning("⚠ الرجاء إدخال اسم المستخدم وكلمة المرور.")
+            elif new_username in users:
+                st.warning("⚠ هذا المستخدم موجود بالفعل.")
             else:
-                selected_sheet = st.selectbox(
-                    "📋 اختر المحطة أو القسم للإحصائيات:",
-                    available_sheets,
-                    key="stats_sheet_select"
-                )
-                
-                if selected_sheet:
-                    df = production_data[selected_sheet]
-                    
-                    st.subheader(f"إحصائيات {selected_sheet}")
-                    
-                    # الإحصائيات الأساسية
-                    stats_df = generate_sheet_statistics(df, selected_sheet)
-                    if not stats_df.empty:
-                        st.dataframe(stats_df, use_container_width=True)
-                    else:
-                        st.info("⚠ لا توجد إحصائيات رقمية متاحة للعرض")
-                    
-                    # عرض بسيط للبيانات الرقمية
-                    numeric_columns = df.select_dtypes(include=['number']).columns
-                    if len(numeric_columns) > 0:
-                        st.subheader("📊 البيانات الرقمية")
-                        st.dataframe(df[numeric_columns].describe(), use_container_width=True)
-
-    # -------------------------------
-    # Tab إدارة المستخدمين
-    # -------------------------------
-    if permissions["can_manage_users"] and "👥 إدارة المستخدمين" in tab_names:
-        tab_index = tab_names.index("👥 إدارة المستخدمين")
-        with tabs[tab_index]:
-            st.header("👥 إدارة المستخدمين")
-            
-            users = load_users()
-            
-            # عرض المستخدمين الحاليين
-            st.subheader("📋 المستخدمين الحاليين")
-            if users:
-                user_data = []
-                for username, info in users.items():
-                    user_data.append({
-                        "اسم المستخدم": username,
-                        "الدور": info.get("role", "user"),
-                        "الصلاحيات": ", ".join(info.get("permissions", [])),
-                        "تاريخ الإنشاء": info.get("created_at", "غير معروف")
-                    })
-                
-                users_df = pd.DataFrame(user_data)
-                st.dataframe(users_df, use_container_width=True)
-            
-            # إضافة مستخدم جديد
-            st.subheader("➕ إضافة مستخدم جديد")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                new_username = st.text_input("اسم المستخدم الجديد:")
-            with col2:
-                new_password = st.text_input("كلمة المرور:", type="password")
-            with col3:
-                user_role = st.selectbox("الدور:", ["admin", "data_entry", "viewer"])
-            
-            if st.button("إضافة مستخدم"):
-                if not new_username.strip() or not new_password.strip():
-                    st.warning("⚠ الرجاء إدخال اسم المستخدم وكلمة المرور.")
-                elif new_username in users:
-                    st.warning("⚠ هذا المستخدم موجود بالفعل.")
+                if user_role == "admin":
+                    permissions_list = ["all"]
+                elif user_role == "data_entry":
+                    permissions_list = ["data_entry"]
                 else:
-                    if user_role == "admin":
-                        permissions_list = ["all"]
-                    elif user_role == "data_entry":
-                        permissions_list = ["data_entry", "view_stats"]
-                    else:
-                        permissions_list = ["view_stats"]
-                    
-                    users[new_username] = {
-                        "password": new_password,
-                        "role": user_role,
-                        "permissions": permissions_list,
-                        "created_at": datetime.now().isoformat()
-                    }
-                    if save_users(users):
-                        st.success(f"✅ تم إضافة المستخدم '{new_username}' بنجاح.")
-                        st.rerun()
+                    permissions_list = ["view_stats"]
+                
+                users[new_username] = {
+                    "password": new_password,
+                    "role": user_role,
+                    "permissions": permissions_list,
+                    "created_at": datetime.now().isoformat()
+                }
+                if save_users(users):
+                    st.success(f"✅ تم إضافة المستخدم '{new_username}' بنجاح.")
+                    st.rerun()
 
-    # -------------------------------
-    # Tab الدعم الفني
-    # -------------------------------
-    if permissions["can_see_tech_support"] and "📞 الدعم الفني" in tab_names:
-        tab_index = tab_names.index("📞 الدعم الفني")
-        with tabs[tab_index]:
-            st.header("📞 الدعم الفني")
-            
-            st.markdown("## 🛠 معلومات التطوير والدعم")
-            st.markdown("تم تطوير هذا التطبيق بواسطة:")
-            st.markdown("### م. محمد عبدالله")
-            st.markdown("### رئيس قسم الكرد والمحطات")
-            st.markdown("### مصنع بيل يارن للغزل")
-            st.markdown("---")
-            st.markdown("### معلومات الاتصال:")
-            st.markdown("- 📧 البريد الإلكتروني: m.abdallah@bailyarn.com")
-            st.markdown("- 📞 هاتف المصنع: 01000000000")
-            st.markdown("---")
-            st.markdown("### إصدار النظام:")
-            st.markdown("- الإصدار: 2.0 (مستقر)")
-            st.markdown("- آخر تحديث: 2024")
-            st.markdown("- النظام: نظام إدارة محطات الإنتاج")
-            
-            st.info("""
-            *ملاحظات مهمة:*
-            - النظام يدعم جميع أنواع ملفات Excel متعددة الشيتات
-            - يمكن عرض وتعديل أي شيت تلقائياً
-            - في حالة وجود أي مشاكل، يرجى التواصل مع الدعم الفني
-            """)
-
-# التشغيل الرئيسي للتطبيق
-
-   if _name_ == "_main_":
-       main()
+# -------------------------------
+# Tab 5: الدعم الفني
+# -------------------------------
+if len(tabs) > 4:
+    with tabs[4]:
+        st.header("📞 الدعم الفني")
+        
+        st.markdown("## 🛠 معلومات التطوير والدعم")
+        st.markdown("تم تطوير هذا التطبيق بواسطة:")
+        st.markdown("### م. محمد عبدالله")
+        st.markdown("### رئيس قسم الكرد والمحطات")
+        st.markdown("### مصنع بيل يارن للغزل")
+        st.markdown("---")
+        st.markdown("### معلومات الاتصال:")
+        st.markdown("- 📧 البريد الإلكتروني: m.abdallah@bailyarn.com")
+        st.markdown("- 📞 هاتف المصنع: 01000000000")
+        st.markdown("---")
+        st.markdown("### إصدار النظام:")
+        st.markdown("- الإصدار: 1.0")
+        st.markdown("- آخر تحديث: 2024")
+        st.markdown("- النظام: نظام إدارة محطات الإنتاج")
+        
+        st.info("""
+        *ملاحظات مهمة:*
+        - النظام يدعم جميع أنواع ملفات Excel متعددة الشيتات
+        - يمكن عرض وتعديل أي شيت تلقائياً دون الحاجة لتحديد الأعمدة
+        - البيانات تحفظ تلقائياً على GitHub للنسخ الاحتياطي
+        - يمكن تصدير البيانات بأي وقت كملف Excel
+        """)

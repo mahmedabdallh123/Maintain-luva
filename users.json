@@ -1,5 +1,5 @@
 {
-    "admin": {"password": "0000"},
+    "admin": {"password": "1111"},
     "user1": {"password": "12345"},
     "user2": {"password": "99999"}
 }

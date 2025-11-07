@@ -406,6 +406,7 @@ def safe_numeric_filter(df, column):
 # 🖥 الواجهة الرئيسية
 # -------------------------------
 def main():
+    print("🔥 تم دخول الدالة main()")
     st.set_page_config(
         page_title=APP_CONFIG["APP_TITLE"], 
         layout="wide",
@@ -723,4 +724,5 @@ def main():
 
 # التشغيل الرئيسي للتطبيق
 
+  if _name_ == "_main_":
     main()

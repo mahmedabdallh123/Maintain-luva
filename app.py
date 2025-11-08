@@ -26,14 +26,14 @@ APP_CONFIG = {
     "APP_ICON": "🏭",
     
     # إعدادات GitHub
-    "REPO_NAME": "mahmedabdallh123/Maintain-luva",
+    "REPO_NAME": "mahmedabdallh123/luva",
     "BRANCH": "main",
     "PRODUCTION_FILE_PATH": "station.xlsx",
     "LOCAL_PRODUCTION_FILE": "station.xlsx",
     
     # إعدادات الأمان
-    "MAX_ACTIVE_USERS": 5,
-    "SESSION_DURATION_MINUTES": 120,  # زيادة مدة الجلسة
+    "MAX_ACTIVE_USERS": 10,  # زيادة عدد المستخدمين
+    "SESSION_DURATION_MINUTES": 240,  # زيادة مدة الجلسة
     
     # إعدادات الواجهة
     "SHOW_TECH_SUPPORT_TO_ALL": True,
@@ -59,13 +59,15 @@ def load_users():
                 "password": "1111", 
                 "role": "admin", 
                 "created_at": datetime.now().isoformat(),
-                "permissions": ["all"]
+                "permissions": ["all"],
+                "full_name": "المسؤول الرئيسي"
             },
             "user1": {
                 "password": "12345", 
-                "role": "admin",  # تغيير جميع الأدوار إلى admin
+                "role": "admin",
                 "created_at": datetime.now().isoformat(),
-                "permissions": ["all"]  # منح جميع الصلاحيات
+                "permissions": ["all"],
+                "full_name": "مستخدم تجريبي"
             }
         }
         with open(USERS_FILE, "w", encoding="utf-8") as f:
@@ -75,25 +77,27 @@ def load_users():
         with open(USERS_FILE, "r", encoding="utf-8") as f:
             users = json.load(f)
             # تحديث جميع المستخدمين الحاليين لمنحهم جميع الصلاحيات
-            for username in users:
-                users[username]["role"] = "admin"
-                users[username]["permissions"] = ["all"]
+            for username, info in users.items():
+                info["role"] = "admin"
+                info["permissions"] = ["all"]
+                if "full_name" not in info:
+                    info["full_name"] = username
             return users
     except Exception as e:
         st.error(f"❌ خطأ في ملف users.json: {e}")
         return {
-            "admin": {"password": "1111", "role": "admin", "permissions": ["all"], "created_at": datetime.now().isoformat()},
-            "user1": {"password": "12345", "role": "admin", "permissions": ["all"], "created_at": datetime.now().isoformat()}
+            "admin": {
+                "password": "1111", 
+                "role": "admin", 
+                "permissions": ["all"], 
+                "created_at": datetime.now().isoformat(),
+                "full_name": "المسؤول الرئيسي"
+            }
         }
 
 def save_users(users):
     """حفظ بيانات المستخدمين إلى ملف JSON"""
     try:
-        # التأكد من أن جميع المستخدمين لديهم جميع الصلاحيات
-        for username in users:
-            users[username]["role"] = "admin"
-            users[username]["permissions"] = ["all"]
-            
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(users, f, indent=4, ensure_ascii=False)
         return True
@@ -175,6 +179,7 @@ def login_ui():
         st.session_state.username = None
         st.session_state.user_role = None
         st.session_state.user_permissions = []
+        st.session_state.user_fullname = None
 
     st.title(f"{APP_CONFIG['APP_ICON']} تسجيل الدخول - {APP_CONFIG['APP_TITLE']}")
 
@@ -186,7 +191,7 @@ def login_ui():
     st.caption(f"🔒 المستخدمون النشطون الآن: {active_count} / {MAX_ACTIVE_USERS}")
 
     if not st.session_state.logged_in:
-        if st.button("تسجيل الدخول"):
+        if st.button("تسجيل الدخول", type="primary"):
             if username_input in users and users[username_input]["password"] == password:
                 if username_input == "admin":
                     pass
@@ -200,17 +205,18 @@ def login_ui():
                 save_state(state)
                 st.session_state.logged_in = True
                 st.session_state.username = username_input
-                st.session_state.user_role = "admin"  # جميع المستخدمين مسؤولين
-                st.session_state.user_permissions = ["all"]  # جميع الصلاحيات
-                st.success(f"✅ تم تسجيل الدخول: {username_input} (مدير النظام)")
+                st.session_state.user_role = "admin"
+                st.session_state.user_permissions = ["all"]
+                st.session_state.user_fullname = users[username_input].get("full_name", username_input)
+                st.success(f"✅ تم تسجيل الدخول: {st.session_state.user_fullname} (مدير النظام)")
                 st.rerun()
             else:
                 st.error("❌ كلمة المرور غير صحيحة.")
         return False
     else:
         username = st.session_state.username
-        user_role = st.session_state.user_role
-        st.success(f"✅ مسجل الدخول كـ: {username} (مدير النظام)")
+        user_fullname = st.session_state.user_fullname
+        st.success(f"✅ مسجل الدخول كـ: {user_fullname} (مدير النظام)")
         rem = remaining_time(state, username)
         if rem:
             mins, secs = divmod(int(rem.total_seconds()), 60)
@@ -241,7 +247,7 @@ def get_file_from_github():
         if github_token:
             headers = {"Authorization": f"token {github_token}"}
         
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=30)
         
         if response.status_code == 200:
             content = response.json()['content']
@@ -288,7 +294,7 @@ def save_file_to_github(df_dict, sha, commit_message):
         if github_token:
             headers["Authorization"] = f"token {github_token}"
         
-        response = requests.put(url, json=data, headers=headers)
+        response = requests.put(url, json=data, headers=headers, timeout=30)
         
         if response.status_code == 200:
             return True, response.json()['commit']['html_url']
@@ -431,19 +437,37 @@ def generate_sheet_statistics(df, sheet_name):
         'القيمة': [len(df), len(df.columns), df.count().sum()]
     }
     
-    # إحصائيات عددية للأعمدة الرقمية
+    # إحصائيات عددية للأعمدة الرقمية فقط
     numeric_columns = df.select_dtypes(include=['number']).columns
     if len(numeric_columns) > 0:
         for col in numeric_columns:
-            stats['المعيار'].extend([f'متوسط {col}', f'أقل {col}', f'أعلى {col}', f'مجموع {col}'])
-            stats['القيمة'].extend([
-                df[col].mean().round(2),
-                df[col].min(),
-                df[col].max(),
-                df[col].sum()
-            ])
+            # التحقق من أن العمود رقمي بالفعل قبل حساب الإحصائيات
+            if pd.api.types.is_numeric_dtype(df[col]):
+                try:
+                    stats['المعيار'].extend([f'متوسط {col}', f'أقل {col}', f'أعلى {col}', f'مجموع {col}'])
+                    stats['القيمة'].extend([
+                        df[col].mean().round(2),
+                        df[col].min(),
+                        df[col].max(),
+                        df[col].sum()
+                    ])
+                except:
+                    # في حالة وجود خطأ في العمود الرقمي، نتخطاه
+                    continue
     
     return pd.DataFrame(stats)
+
+def create_backup():
+    """إنشاء نسخة احتياطية من الملف"""
+    try:
+        if os.path.exists(APP_CONFIG["LOCAL_PRODUCTION_FILE"]):
+            backup_name = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            shutil.copy2(APP_CONFIG["LOCAL_PRODUCTION_FILE"], backup_name)
+            return backup_name
+        return None
+    except Exception as e:
+        st.error(f"❌ خطأ في إنشاء النسخة الاحتياطية: {e}")
+        return None
 
 # -------------------------------
 # 🖥 الواجهة الرئيسية
@@ -459,25 +483,32 @@ with st.sidebar:
     else:
         state = cleanup_sessions(load_state())
         username = st.session_state.username
-        user_role = st.session_state.user_role
+        user_fullname = st.session_state.user_fullname
         rem = remaining_time(state, username)
         if rem:
             mins, secs = divmod(int(rem.total_seconds()), 60)
-            st.success(f"👋 {username} | الدور: مدير النظام | ⏳ {mins:02d}:{secs:02d}")
+            st.success(f"👋 {user_fullname} | الدور: مدير النظام | ⏳ {mins:02d}:{secs:02d}")
         else:
             logout_action()
 
     st.markdown("---")
-    st.write("🔧 أدوات النظام:")
+    st.header("🔧 أدوات النظام")
     
-    if st.button("🔄 تحديث الملف من GitHub"):
+    if st.button("🔄 تحديث الملف من GitHub", use_container_width=True):
         if fetch_production_from_github():
             st.success("✅ تم تحديث البيانات بنجاح")
             st.rerun()
         else:
             st.error("❌ فشل في تحديث البيانات")
     
-    if st.button("🗑 مسح الكاش"):
+    if st.button("💾 إنشاء نسخة احتياطية", use_container_width=True):
+        backup_file = create_backup()
+        if backup_file:
+            st.success(f"✅ تم إنشاء النسخة الاحتياطية: {backup_file}")
+        else:
+            st.error("❌ فشل في إنشاء النسخة الاحتياطية")
+    
+    if st.button("🗑 مسح الكاش", use_container_width=True):
         try:
             st.cache_data.clear()
             st.success("✅ تم مسح الكاش بنجاح")
@@ -486,7 +517,18 @@ with st.sidebar:
             st.error(f"❌ خطأ في مسح الكاش: {e}")
     
     st.markdown("---")
-    if st.button("🚪 تسجيل الخروج"):
+    
+    # معلومات النظام
+    st.header("ℹ معلومات النظام")
+    production_data = load_production_data()
+    if production_data:
+        total_sheets = len(production_data)
+        total_rows = sum(len(df) for df in production_data.values())
+        st.info(f"📊 إحصائيات:\n- الأوراق: {total_sheets}\n- الصفوف: {total_rows}")
+    
+    st.markdown("---")
+    
+    if st.button("🚪 تسجيل الخروج", use_container_width=True, type="primary"):
         logout_action()
 
 # تحميل البيانات
@@ -539,13 +581,17 @@ with tabs[0]:
             st.subheader("🔍 تصفية البيانات")
             text_columns = df.select_dtypes(include=['object']).columns
             if len(text_columns) > 0:
-                filter_column = st.selectbox("اختر عمود للتصفية:", text_columns)
-                unique_values = df[filter_column].unique()
-                selected_value = st.selectbox("اختر قيمة:", unique_values)
+                col1, col2 = st.columns(2)
+                with col1:
+                    filter_column = st.selectbox("اختر عمود للتصفية:", text_columns)
+                with col2:
+                    unique_values = df[filter_column].unique()
+                    selected_value = st.selectbox("اختر قيمة:", unique_values)
                 
                 if st.button("تطبيق التصفية"):
                     filtered_df = df[df[filter_column] == selected_value]
                     st.dataframe(filtered_df, use_container_width=True)
+                    st.info(f"تم العثور على {len(filtered_df)} صف")
 
 # -------------------------------
 # Tab 2: تعديل البيانات
@@ -584,7 +630,7 @@ with tabs[1]:
             with col1:
                 commit_message = st.text_input("رسالة الحفظ", value=f"تحديث {selected_sheet}")
                 
-                if st.button("💾 حفظ التغييرات", type="primary"):
+                if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True):
                     success, commit_url = update_sheet_data(selected_sheet, edited_df)
                     if success:
                         st.success("✅ تم حفظ التغييرات بنجاح")
@@ -595,11 +641,11 @@ with tabs[1]:
                         st.error("❌ فشل في حفظ التغييرات")
             
             with col2:
-                if st.button("🔄 إعادة تحميل"):
+                if st.button("🔄 إعادة تحميل", use_container_width=True):
                     st.rerun()
             
             with col3:
-                if st.button("📥 تصدير البيانات"):
+                if st.button("📥 تصدير البيانات", use_container_width=True):
                     buffer = io.BytesIO()
                     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                         edited_df.to_excel(writer, sheet_name=selected_sheet, index=False)
@@ -608,12 +654,14 @@ with tabs[1]:
                         label="تحميل كملف Excel",
                         data=buffer.getvalue(),
                         file_name=f"{selected_sheet}_{datetime.now().date()}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
                     )
             
             # إضافة صف جديد
             st.subheader("➕ إضافة بيانات جديدة")
             with st.form(f"add_row_form_{selected_sheet}"):
+                st.write("املأ البيانات الجديدة:")
                 new_row_data = {}
                 cols = st.columns(min(4, len(df.columns)))
                 
@@ -632,13 +680,22 @@ with tabs[1]:
                                 key=f"new_{column}_{selected_sheet}"
                             )
                 
-                if st.form_submit_button("إضافة صف جديد"):
-                    new_df = pd.concat([edited_df, pd.DataFrame([new_row_data])], ignore_index=True)
-                    success, commit_url = update_sheet_data(selected_sheet, new_df)
-                    if success:
-                        st.success("✅ تم إضافة الصف الجديد بنجاح")
-                        if commit_url:
-                            st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.form_submit_button("إضافة صف جديد", use_container_width=True):
+                        if any(new_row_data.values()):  # التحقق من وجود بيانات
+                            new_df = pd.concat([edited_df, pd.DataFrame([new_row_data])], ignore_index=True)
+                            success, commit_url = update_sheet_data(selected_sheet, new_df)
+                            if success:
+                                st.success("✅ تم إضافة الصف الجديد بنجاح")
+                                if commit_url:
+                                    st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
+                                st.rerun()
+                        else:
+                            st.warning("⚠ يرجى إدخال بيانات في الحقول")
+                
+                with col2:
+                    if st.form_submit_button("مسح الحقول", use_container_width=True, type="secondary"):
                         st.rerun()
 
 # -------------------------------
@@ -663,10 +720,36 @@ with tabs[2]:
             
             st.subheader(f"إحصائيات {selected_sheet}")
             
-            # الإحصائيات الأساسية
-            stats_df = generate_sheet_statistics(df, selected_sheet)
-            if not stats_df.empty:
-                st.dataframe(stats_df, use_container_width=True)
+            # الإحصائيات الأساسية فقط (دون الإحصائيات العددية)
+            stats = {
+                'المعيار': ['عدد الصفوف', 'عدد الأعمدة', 'البيانات غير الفارغة'],
+                'القيمة': [len(df), len(df.columns), df.count().sum()]
+            }
+            
+            # عرض معلومات عن أنواع البيانات
+            numeric_columns = df.select_dtypes(include=['number']).columns
+            text_columns = df.select_dtypes(include=['object']).columns
+            
+            stats['المعيار'].extend(['الأعمدة الرقمية', 'الأعمدة النصية'])
+            stats['القيمة'].extend([len(numeric_columns), len(text_columns)])
+            
+            stats_df = pd.DataFrame(stats)
+            st.dataframe(stats_df, use_container_width=True)
+            
+            # عرض معلومات الأعمدة
+            st.subheader("📋 معلومات الأعمدة")
+            column_info = []
+            for col in df.columns:
+                col_info = {
+                    'اسم العمود': col,
+                    'نوع البيانات': str(df[col].dtype),
+                    'القيم الفريدة': df[col].nunique(),
+                    'القيم الفارغة': df[col].isnull().sum()
+                }
+                column_info.append(col_info)
+            
+            column_df = pd.DataFrame(column_info)
+            st.dataframe(column_df, use_container_width=True)
 
 # -------------------------------
 # Tab 4: إدارة المستخدمين
@@ -683,6 +766,7 @@ with tabs[3]:
         for username, info in users.items():
             user_data.append({
                 "اسم المستخدم": username,
+                "الاسم الكامل": info.get("full_name", username),
                 "الدور": "مدير النظام",
                 "الصلاحيات": "جميع الصلاحيات",
                 "تاريخ الإنشاء": info.get("created_at", "غير معروف")
@@ -696,13 +780,19 @@ with tabs[3]:
     
     col1, col2 = st.columns(2)
     with col1:
-        new_username = st.text_input("اسم المستخدم الجديد:")
+        new_username = st.text_input("اسم المستخدم الجديد:", placeholder="أدخل اسم المستخدم")
+        new_fullname = st.text_input("الاسم الكامل:", placeholder="أدخل الاسم الكامل")
     with col2:
-        new_password = st.text_input("كلمة المرور:", type="password")
+        new_password = st.text_input("كلمة المرور:", type="password", placeholder="أدخل كلمة المرور")
+        confirm_password = st.text_input("تأكيد كلمة المرور:", type="password", placeholder="أكد كلمة المرور")
     
-    if st.button("إضافة مستخدم"):
-        if not new_username.strip() or not new_password.strip():
-            st.warning("⚠ الرجاء إدخال اسم المستخدم وكلمة المرور.")
+    if st.button("إضافة مستخدم", type="primary", use_container_width=True):
+        if not new_username.strip():
+            st.warning("⚠ يرجى إدخال اسم المستخدم.")
+        elif not new_password.strip():
+            st.warning("⚠ يرجى إدخال كلمة المرور.")
+        elif new_password != confirm_password:
+            st.warning("⚠ كلمتا المرور غير متطابقتين.")
         elif new_username in users:
             st.warning("⚠ هذا المستخدم موجود بالفعل.")
         else:
@@ -710,7 +800,8 @@ with tabs[3]:
                 "password": new_password,
                 "role": "admin",
                 "permissions": ["all"],
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.now().isoformat(),
+                "full_name": new_fullname or new_username
             }
             if save_users(users):
                 st.success(f"✅ تم إضافة المستخدم '{new_username}' بنجاح.")
@@ -718,14 +809,17 @@ with tabs[3]:
     
     # حذف مستخدم
     st.subheader("🗑 حذف مستخدم")
-    user_to_delete = st.selectbox("اختر مستخدم للحذف:", [u for u in users.keys() if u != "admin"])
-    
-    if st.button("حذف المستخدم"):
-        if user_to_delete and user_to_delete in users and user_to_delete != "admin":
-            del users[user_to_delete]
-            if save_users(users):
-                st.success(f"✅ تم حذف المستخدم '{user_to_delete}' بنجاح.")
-                st.rerun()
+    if len(users) > 1:
+        user_to_delete = st.selectbox("اختر مستخدم للحذف:", [u for u in users.keys() if u != "admin"])
+        
+        if st.button("حذف المستخدم", type="secondary", use_container_width=True):
+            if user_to_delete and user_to_delete in users and user_to_delete != "admin":
+                del users[user_to_delete]
+                if save_users(users):
+                    st.success(f"✅ تم حذف المستخدم '{user_to_delete}' بنجاح.")
+                    st.rerun()
+    else:
+        st.info("⚠ لا يمكن حذف جميع المستخدمين. يجب أن يبقى مستخدم واحد على الأقل.")
 
 # -------------------------------
 # Tab 5: الدعم الفني
@@ -733,21 +827,62 @@ with tabs[3]:
 with tabs[4]:
     st.header("📞 الدعم الفني")
     
-    st.markdown("## 🛠 معلومات التطوير والدعم")
-    st.markdown("تم تطوير هذا التطبيق بواسطة:")
-    st.markdown("### م. محمد عبدالله")
-    st.markdown("### رئيس قسم الكرد والمحطات")
-    st.markdown("### مصنع بيل يارن للغزل")
-    st.markdown("---")
-    st.markdown("### معلومات الاتصال:")
-    st.markdown("- 📧 البريد الإلكتروني: m.abdallah@bailyarn.com")
-    st.markdown("- 📞 هاتف المصنع: 01000000000")
-    st.markdown("---")
-    st.markdown("### إصدار النظام:")
-    st.markdown("- الإصدار: 2.0")
-    st.markdown("- آخر تحديث: 2024")
-    st.markdown("- النظام: نظام إدارة محطات الإنتاج")
+    col1, col2 = st.columns(2)
     
+    with col1:
+        st.markdown("## 🛠 معلومات التطوير والدعم")
+        st.markdown("تم تطوير هذا التطبيق بواسطة:")
+        st.markdown("### م. محمد عبدالله")
+        st.markdown("### رئيس قسم الكرد والمحطات")
+        st.markdown("### مصنع بيل يارن للغزل")
+        
+        st.markdown("---")
+        st.markdown("### معلومات الاتصال:")
+        st.markdown("- 📧 البريد الإلكتروني: m.abdallah@bailyarn.com")
+        st.markdown("- 📞 هاتف المصنع: 01000000000")
+        
+        st.markdown("---")
+        st.markdown("### إصدار النظام:")
+        st.markdown("- الإصدار: 2.1")
+        st.markdown("- آخر تحديث: 2024")
+        st.markdown("- النظام: نظام إدارة محطات الإنتاج")
+    
+    with col2:
+        st.markdown("## 📊 حالة النظام")
+        
+        # معلومات النظام
+        system_info = {
+            "المعيار": ["عدد الأوراق", "إجمالي الصفوف", "عدد المستخدمين", "حالة GitHub"],
+            "القيمة": [
+                len(production_data) if production_data else 0,
+                sum(len(df) for df in production_data.values()) if production_data else 0,
+                len(users),
+                "✅ متصل" if st.session_state.get('file_sha') else "❌ غير متصل"
+            ]
+        }
+        
+        system_df = pd.DataFrame(system_info)
+        st.dataframe(system_df, use_container_width=True)
+        
+        # أدوات فنية
+        st.markdown("### 🔧 أدوات فنية")
+        
+        if st.button("فحص اتصال GitHub", use_container_width=True):
+            if fetch_production_from_github():
+                st.success("✅ الاتصال مع GitHub يعمل بشكل صحيح")
+            else:
+                st.error("❌ هناك مشكلة في الاتصال مع GitHub")
+        
+        if st.button("عرض معلومات الجلسة", use_container_width=True):
+            session_info = {
+                "المستخدم": st.session_state.get('username', 'غير معروف'),
+                "الاسم الكامل": st.session_state.get('user_fullname', 'غير معروف'),
+                "الدور": st.session_state.get('user_role', 'غير معروف'),
+                "وقت التسجيل": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            st.json(session_info)
+    
+    st.markdown("---")
     st.info("""
     *ملاحظات مهمة:*
     - النظام يدعم جميع أنواع ملفات Excel متعددة الشيتات
@@ -755,16 +890,23 @@ with tabs[4]:
     - البيانات تحفظ تلقائياً على GitHub للنسخ الاحتياطي
     - يمكن تصدير البيانات بأي وقت كملف Excel
     - جميع المستخدمين لديهم صلاحيات كاملة
+    - النظام يدعم النسخ الاحتياطي التلقائي
     """)
-    
-    # معلومات تقنية
-    st.markdown("### معلومات تقنية:")
-    st.markdown(f"- ملف البيانات: {APP_CONFIG['PRODUCTION_FILE_PATH']}")
-    st.markdown(f"- مستودع GitHub: {APP_CONFIG['REPO_NAME']}")
-    st.markdown(f"- عدد المستخدمين: {len(users)}")
-    
-    if st.button("🔄 فحص اتصال GitHub"):
-        if fetch_production_from_github():
-            st.success("✅ الاتصال مع GitHub يعمل بشكل صحيح")
-        else:
-            st.error("❌ هناك مشكلة في الاتصال مع GitHub")
+
+# -------------------------------
+# تذييل الصفحة
+# -------------------------------
+st.markdown("---")
+footer_col1, footer_col2, footer_col3 = st.columns(3)
+with footer_col1:
+    st.caption(f"👤 {st.session_state.get('user_fullname', 'زائر')}")
+with footer_col2:
+    st.caption(f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+with footer_col3:
+    st.caption("مصنع بيل يارن للغزل © 2024")
+
+# تهيئة session state إذا لزم الأمر
+if 'file_sha' not in st.session_state:
+    st.session_state.file_sha = None
+if 'file_url' not in st.session_state:
+    st.session_state.file_url = None

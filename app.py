@@ -28,7 +28,7 @@ APP_CONFIG = {
     # إعدادات GitHub
     "REPO_NAME": "mahmedabdallh123/Maintain-luva",
     "BRANCH": "main",
-    "PRODUCTION_FILE_PATH": "station.xlsx",  # ملف محطات الإنتاج
+    "PRODUCTION_FILE_PATH": "station.xlsx",
     "LOCAL_PRODUCTION_FILE": "station.xlsx",
     
     # إعدادات الأمان
@@ -215,11 +215,21 @@ def login_ui():
 # -------------------------------
 # 🔄 دوال جلب وحفظ الملف من/إلى GitHub
 # -------------------------------
-def get_file_from_github(repo_owner, repo_name, file_path, github_token, branch="main"):
+def get_file_from_github():
     """جلب ملف Excel من GitHub"""
     try:
-        url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{file_path}?ref={branch}"
-        headers = {"Authorization": f"token {github_token}"}
+        repo_parts = APP_CONFIG["REPO_NAME"].split('/')
+        if len(repo_parts) != 2:
+            st.error("❌ تنسيق REPO_NAME غير صحيح.")
+            return None, None, None
+            
+        repo_owner, repo_name = repo_parts
+        url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{APP_CONFIG['PRODUCTION_FILE_PATH']}?ref={APP_CONFIG['BRANCH']}"
+        
+        github_token = os.getenv('GITHUB_TOKEN')
+        headers = {}
+        if github_token:
+            headers = {"Authorization": f"token {github_token}"}
         
         response = requests.get(url, headers=headers)
         
@@ -228,16 +238,22 @@ def get_file_from_github(repo_owner, repo_name, file_path, github_token, branch=
             file_content = base64.b64decode(content)
             return file_content, response.json()['sha'], response.json().get('html_url')
         else:
-            st.error(f"خطأ في جلب الملف: {response.status_code} - {response.json().get('message', '')}")
+            st.error(f"خطأ في جلب الملف: {response.status_code}")
             return None, None, None
     except Exception as e:
         st.error(f"خطأ: {str(e)}")
         return None, None, None
 
-def save_file_to_github(df_dict, sha, commit_message, repo_owner, repo_name, file_path, github_token, branch="main"):
+def save_file_to_github(df_dict, sha, commit_message):
     """حفظ الملف إلى GitHub"""
     try:
-        url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{file_path}"
+        repo_parts = APP_CONFIG["REPO_NAME"].split('/')
+        if len(repo_parts) != 2:
+            st.error("❌ تنسيق REPO_NAME غير صحيح.")
+            return False, None
+            
+        repo_owner, repo_name = repo_parts
+        url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{APP_CONFIG['PRODUCTION_FILE_PATH']}"
         
         # تحويل جميع DataFrames إلى Excel في الذاكرة
         output = io.BytesIO()
@@ -247,24 +263,27 @@ def save_file_to_github(df_dict, sha, commit_message, repo_owner, repo_name, fil
         
         content_base64 = base64.b64encode(output.getvalue()).decode()
         
+        github_token = os.getenv('GITHUB_TOKEN')
+        
         data = {
             "message": commit_message,
             "content": content_base64,
             "sha": sha,
-            "branch": branch
+            "branch": APP_CONFIG["BRANCH"]
         }
         
         headers = {
-            "Authorization": f"token {github_token}",
             "Accept": "application/vnd.github.v3+json"
         }
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
         
         response = requests.put(url, json=data, headers=headers)
         
         if response.status_code == 200:
             return True, response.json()['commit']['html_url']
         else:
-            st.error(f"خطأ في الحفظ: {response.status_code} - {response.json().get('message', '')}")
+            st.error(f"خطأ في الحفظ: {response.status_code}")
             return False, None
             
     except Exception as e:
@@ -274,29 +293,8 @@ def save_file_to_github(df_dict, sha, commit_message, repo_owner, repo_name, fil
 def fetch_production_from_github():
     """تحميل ملف الإنتاج من GitHub"""
     try:
-        # استخدام إعدادات GitHub من التطبيق
-        repo_parts = APP_CONFIG["REPO_NAME"].split('/')
-        if len(repo_parts) != 2:
-            st.error("❌ تنسيق REPO_NAME غير صحيح. يجب أن يكون بصيغة: owner/repo")
-            return False
-            
-        repo_owner, repo_name = repo_parts
-        
-        # الحصول على GitHub Token من البيئة أو من المستخدم
-        github_token = st.session_state.get('github_token') or os.getenv('GITHUB_TOKEN')
-        
-        if not github_token:
-            st.error("❌ لم يتم العثور على GitHub Token. يرجى إدخاله في الإعدادات.")
-            return False
-        
         with st.spinner("جاري تحميل البيانات من GitHub..."):
-            file_content, file_sha, file_url = get_file_from_github(
-                repo_owner, 
-                repo_name, 
-                APP_CONFIG["PRODUCTION_FILE_PATH"], 
-                github_token,
-                APP_CONFIG["BRANCH"]
-            )
+            file_content, file_sha, file_url = get_file_from_github()
             
             if file_content:
                 # حفظ الملف محلياً
@@ -373,29 +371,21 @@ def save_production_data(sheets_data, commit_message="تحديث بيانات م
             pass
 
         # الحفظ على GitHub إذا كان هناك token
-        github_token = st.session_state.get('github_token') or os.getenv('GITHUB_TOKEN')
+        github_token = os.getenv('GITHUB_TOKEN')
         if github_token and 'file_sha' in st.session_state:
-            repo_parts = APP_CONFIG["REPO_NAME"].split('/')
-            if len(repo_parts) == 2:
-                repo_owner, repo_name = repo_parts
-                success, commit_url = save_file_to_github(
-                    sheets_data,
-                    st.session_state.file_sha,
-                    commit_message,
-                    repo_owner,
-                    repo_name,
-                    APP_CONFIG["PRODUCTION_FILE_PATH"],
-                    github_token,
-                    APP_CONFIG["BRANCH"]
-                )
-                if success:
-                    st.session_state.file_sha = requests.get(
-                        f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{APP_CONFIG['PRODUCTION_FILE_PATH']}",
-                        headers={"Authorization": f"token {github_token}"}
-                    ).json()['sha']
-                    return True, commit_url
-                else:
-                    return False, None
+            success, commit_url = save_file_to_github(
+                sheets_data,
+                st.session_state.file_sha,
+                commit_message
+            )
+            if success:
+                # تحديث SHA بعد الحفظ
+                file_content, new_sha, file_url = get_file_from_github()
+                if new_sha:
+                    st.session_state.file_sha = new_sha
+                return True, commit_url
+            else:
+                return False, None
         
         return True, None
         
@@ -490,24 +480,6 @@ with st.sidebar:
             logout_action()
 
     st.markdown("---")
-    st.header("⚙ إعدادات GitHub")
-    
-    # إدخال GitHub Token
-    github_token = st.text_input(
-        "GitHub Token", 
-        type="password",
-        value=st.session_state.get('github_token', ''),
-        help="أدخل توكن GitHub للحصول على صلاحيات القراءة والكتابة"
-    )
-    if github_token:
-        st.session_state.github_token = github_token
-    
-    # معلومات المستودع
-    st.info(f"*المستودع:* {APP_CONFIG['REPO_NAME']}")
-    st.info(f"*الفرع:* {APP_CONFIG['BRANCH']}")
-    st.info(f"*مسار الملف:* {APP_CONFIG['PRODUCTION_FILE_PATH']}")
-    
-    st.markdown("---")
     st.write("🔧 أدوات النظام:")
     
     if st.button("🔄 تحديث الملف من GitHub"):
@@ -584,38 +556,17 @@ if len(tabs) > 0:
                 # عرض البيانات
                 st.dataframe(df, use_container_width=True, height=400)
                 
-                # خيارات التصفية
+                # خيارات التصفية النصية فقط
                 st.subheader("🔍 تصفية البيانات")
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # تصفية حسب الأعمدة النصية
-                    text_columns = df.select_dtypes(include=['object']).columns
-                    if len(text_columns) > 0:
-                        filter_column = st.selectbox("اختر عمود للتصفية:", text_columns)
-                        unique_values = df[filter_column].unique()
-                        selected_value = st.selectbox("اختر قيمة:", unique_values)
-                        
-                        if st.button("تطبيق التصفية"):
-                            filtered_df = df[df[filter_column] == selected_value]
-                            st.dataframe(filtered_df, use_container_width=True)
-                
-                with col2:
-                    # تصفية حسب الأعمدة الرقمية
-                    numeric_columns = df.select_dtypes(include=['number']).columns
-                    if len(numeric_columns) > 0:
-                        num_filter_column = st.selectbox("اختر عمود رقمي:", numeric_columns)
-                        min_val = float(df[num_filter_column].min())
-                        max_val = float(df[num_filter_column].max())
-                        
-                        selected_min, selected_max = st.slider(
-                            f"اختر مدى {num_filter_column}:",
-                            min_val, max_val, (min_val, max_val)
-                        )
-                        
-                        if st.button("تطبيق التصفية الرقمية"):
-                            filtered_df = df[(df[num_filter_column] >= selected_min) & (df[num_filter_column] <= selected_max)]
-                            st.dataframe(filtered_df, use_container_width=True)
+                text_columns = df.select_dtypes(include=['object']).columns
+                if len(text_columns) > 0:
+                    filter_column = st.selectbox("اختر عمود للتصفية:", text_columns)
+                    unique_values = df[filter_column].unique()
+                    selected_value = st.selectbox("اختر قيمة:", unique_values)
+                    
+                    if st.button("تطبيق التصفية"):
+                        filtered_df = df[df[filter_column] == selected_value]
+                        st.dataframe(filtered_df, use_container_width=True)
 
 # -------------------------------
 # Tab 2: تعديل البيانات (للمستخدمين الذين لديهم صلاحية التعديل)
@@ -739,42 +690,6 @@ if len(tabs) > 2:
                 stats_df = generate_sheet_statistics(df, selected_sheet)
                 if not stats_df.empty:
                     st.dataframe(stats_df, use_container_width=True)
-                
-                # الرسوم البيانية للأعمدة الرقمية
-                numeric_columns = df.select_dtypes(include=['number']).columns
-                if len(numeric_columns) > 0:
-                    st.subheader("📊 رسوم بيانية")
-                    
-                    selected_chart_column = st.selectbox(
-                        "اختر عمود للرسم البياني:",
-                        numeric_columns
-                    )
-                    
-                    if selected_chart_column:
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.bar_chart(df[selected_chart_column])
-                        
-                        with col2:
-                            st.line_chart(df[selected_chart_column])
-                
-                # تحليل الارتباط بين الأعمدة الرقمية
-                if len(numeric_columns) > 1:
-                    st.subheader("🔗 تحليل الارتباط")
-                    correlation_matrix = df[numeric_columns].corr()
-                    st.dataframe(correlation_matrix, use_container_width=True)
-                    
-                    # رسم خريطة حرارية للارتباط
-                    try:
-                        import matplotlib.pyplot as plt
-                        import seaborn as sns
-                        
-                        fig, ax = plt.subplots(figsize=(10, 8))
-                        sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', center=0, ax=ax)
-                        st.pyplot(fig)
-                    except:
-                        st.info("⚠ لا يمكن عرض خريطة الارتباط الحرارية. تأكد من تثبيت مكتبات الرسوم البيانية.")
 
 # -------------------------------
 # Tab 4: إدارة المستخدمين (للمسؤول فقط)

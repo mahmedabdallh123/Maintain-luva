@@ -15,7 +15,7 @@ try:
     from github import Github
     GITHUB_AVAILABLE = True
 except Exception:
-    GITHUB_AVAILABLE = False
+    GITHUB_AVAILABLE = True
 
 # ===============================
 # ⚙ إعدادات التطبيق - نظام إدارة محطات الإنتاج

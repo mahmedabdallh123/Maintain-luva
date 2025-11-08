@@ -15,7 +15,7 @@ st.sidebar.header("إعدادات GitHub")
 # يمكن تعيين القيم الافتراضية هنا
 repo_owner = st.sidebar.text_input("mahmedabdallh123", value="your-username")
 repo_name = st.sidebar.text_input("Maintain-luva", value="your-repo-name") 
-file_path = st.sidebar.text_input("مسار ملف", value="data/stations.xlsx")
+file_path = st.sidebar.text_input("https://github.com/mahmedabdallh123/Maintain-luva/raw/refs/heads/main/station.xlsx", value="data/stations.xlsx")
 branch = st.sidebar.text_input("main", value="main")
 
 # استخدام token من متغيرات البيئة أو من input

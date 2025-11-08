@@ -26,7 +26,7 @@ APP_CONFIG = {
     "APP_ICON": "🏭",
     
     # إعدادات GitHub
-    "REPO_NAME": "mahmedabdallh123/luva",
+    "REPO_NAME": "mahmedabdallh123/Maintain-luva",
     "BRANCH": "main",
     "PRODUCTION_FILE_PATH": "station.xlsx",
     "LOCAL_PRODUCTION_FILE": "station.xlsx",

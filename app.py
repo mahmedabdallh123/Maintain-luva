@@ -28,8 +28,8 @@ APP_CONFIG = {
     # إعدادات GitHub
     "REPO_NAME": "mahmedabdallh123/Maintain-luva",
     "BRANCH": "main",
-    "PRODUCTION_FILE_PATH": "station.xlsx",
-    "LOCAL_PRODUCTION_FILE": "station.xlsx",
+    "FILE_PATH": "station.xlsx",  # تغيير من PRODUCTION_FILE_PATH إلى FILE_PATH
+    "LOCAL_FILE": "station.xlsx",  # تغيير من LOCAL_PRODUCTION_FILE إلى LOCAL_FILE
     
     # إعدادات الأمان
     "MAX_ACTIVE_USERS": 10,
@@ -53,6 +53,9 @@ USERS_FILE = "users.json"
 STATE_FILE = "state.json"
 SESSION_DURATION = timedelta(minutes=APP_CONFIG["SESSION_DURATION_MINUTES"])
 MAX_ACTIVE_USERS = APP_CONFIG["MAX_ACTIVE_USERS"]
+
+# إنشاء رابط GitHub تلقائياً من الإعدادات
+GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
 
 # -------------------------------
 # 🧩 دوال مساعدة للملفات والحالة
@@ -234,213 +237,169 @@ def login_ui():
         return True
 
 # -------------------------------
-# 🔄 دوال جلب وحفظ الملف من/إلى GitHub
+# 🔄 طرق جلب الملف من GitHub - معدلة لتعمل مثل CMMS
 # -------------------------------
-def get_file_from_github():
-    """جلب ملف Excel من GitHub"""
+def fetch_from_github_requests():
+    """تحميل بإستخدام رابط RAW (requests)"""
     try:
-        repo_parts = APP_CONFIG["REPO_NAME"].split('/')
-        if len(repo_parts) != 2:
-            st.error("❌ تنسيق REPO_NAME غير صحيح.")
-            return None, None, None
-            
-        repo_owner, repo_name = repo_parts
-        url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{APP_CONFIG['PRODUCTION_FILE_PATH']}?ref={APP_CONFIG['BRANCH']}"
-        
-        github_token = os.getenv('GITHUB_TOKEN')
-        headers = {}
-        if github_token:
-            headers = {"Authorization": f"token {github_token}"}
-        
-        response = requests.get(url, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            content = response.json()['content']
-            file_content = base64.b64decode(content)
-            return file_content, response.json()['sha'], response.json().get('html_url')
-        else:
-            st.error(f"خطأ في جلب الملف: {response.status_code}")
-            return None, None, None
-    except Exception as e:
-        st.error(f"خطأ: {str(e)}")
-        return None, None, None
-
-def save_file_to_github(file_content, sha, commit_message):
-    """حفظ الملف إلى GitHub"""
-    try:
-        repo_parts = APP_CONFIG["REPO_NAME"].split('/')
-        if len(repo_parts) != 2:
-            st.error("❌ تنسيق REPO_NAME غير صحيح.")
-            return False, None
-            
-        repo_owner, repo_name = repo_parts
-        url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{APP_CONFIG['PRODUCTION_FILE_PATH']}"
-        
-        content_base64 = base64.b64encode(file_content).decode()
-        
-        github_token = os.getenv('GITHUB_TOKEN')
-        
-        data = {
-            "message": commit_message,
-            "content": content_base64,
-            "sha": sha,
-            "branch": APP_CONFIG["BRANCH"]
-        }
-        
-        headers = {
-            "Accept": "application/vnd.github.v3+json"
-        }
-        if github_token:
-            headers["Authorization"] = f"token {github_token}"
-        
-        response = requests.put(url, json=data, headers=headers, timeout=30)
-        
-        if response.status_code == 200 or response.status_code == 201:
-            return True, response.json()['commit']['html_url']
-        else:
-            st.error(f"خطأ في الحفظ: {response.status_code} - {response.text}")
-            return False, None
-            
-    except Exception as e:
-        st.error(f"خطأ في الحفظ: {str(e)}")
-        return False, None
-
-def fetch_production_from_github():
-    """تحميل ملف الإنتاج من GitHub"""
-    try:
-        with st.spinner("جاري تحميل البيانات من GitHub..."):
-            file_content, file_sha, file_url = get_file_from_github()
-            
-            if file_content:
-                with open(APP_CONFIG["LOCAL_PRODUCTION_FILE"], "wb") as f:
-                    f.write(file_content)
-                
-                st.session_state.file_sha = file_sha
-                st.session_state.file_url = file_url
-                
-                try:
-                    st.cache_data.clear()
-                except:
-                    pass
-                    
-                return True
-        return False
-    except Exception as e:
-        st.error(f"⚠ فشل التحديث من GitHub: {e}")
-        return False
-
-# -------------------------------
-# 📂 تحميل البيانات
-# -------------------------------
-@st.cache_data(show_spinner=False)
-def load_production_data():
-    """تحميل بيانات محطات الإنتاج"""
-    if not os.path.exists(APP_CONFIG["LOCAL_PRODUCTION_FILE"]):
-        st.warning("⚠ لم يتم العثور على ملف الإنتاج. سيتم إنشاء ملف جديد عند أول حفظ.")
-        return {}
-    
-    try:
-        excel_file = pd.ExcelFile(APP_CONFIG["LOCAL_PRODUCTION_FILE"])
-        sheets_data = {}
-        
-        for sheet_name in excel_file.sheet_names:
-            df = pd.read_excel(APP_CONFIG["LOCAL_PRODUCTION_FILE"], sheet_name=sheet_name)
-            # تحويل جميع الأعمدة إلى نص لتجنب مشاكل st.data_editor
-            df = df.astype(str)
-            sheets_data[sheet_name] = df
-        
-        return sheets_data
-    except Exception as e:
-        st.error(f"❌ خطأ في تحميل بيانات الإنتاج: {e}")
-        return {}
-
-def get_all_sheets():
-    """الحصول على قائمة جميع الشيتات المتاحة"""
-    sheets_data = load_production_data()
-    return list(sheets_data.keys())
-
-def get_sheet_columns(sheet_name):
-    """الحصول على أعمدة شيت معين"""
-    sheets_data = load_production_data()
-    if sheet_name in sheets_data:
-        return list(sheets_data[sheet_name].columns)
-    return []
-
-# -------------------------------
-# 🔁 حفظ البيانات
-# -------------------------------
-def save_production_data(sheets_data, commit_message="تحديث بيانات محطات الإنتاج"):
-    """حفظ بيانات الإنتاج إلى ملف Excel محلياً وإلى GitHub"""
-    try:
-        # الحفظ المحلي أولاً
-        with pd.ExcelWriter(APP_CONFIG["LOCAL_PRODUCTION_FILE"], engine='openpyxl') as writer:
-            for sheet_name, df in sheets_data.items():
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
-        
-        st.success("✅ تم الحفظ المحلي بنجاح")
-        
+        response = requests.get(GITHUB_EXCEL_URL, stream=True, timeout=15)
+        response.raise_for_status()
+        with open(APP_CONFIG["LOCAL_FILE"], "wb") as f:
+            shutil.copyfileobj(response.raw, f)
         # امسح الكاش
         try:
             st.cache_data.clear()
         except:
             pass
-
-        # الحفظ على GitHub إذا كان هناك token
-        github_token = os.getenv('GITHUB_TOKEN')
-        if github_token:
-            if 'file_sha' not in st.session_state:
-                # إذا لم يكن هناك SHA، نحاول جلب الملف أولاً للحصول على SHA
-                file_content, file_sha, file_url = get_file_from_github()
-                if file_sha:
-                    st.session_state.file_sha = file_sha
-                else:
-                    st.warning("⚠ لا يمكن الحصول على SHA للملف. سيتم محاولة الإنشاء جديد.")
-            
-            # قراءة الملف المحفوظ حديثاً وإرساله إلى GitHub
-            with open(APP_CONFIG["LOCAL_PRODUCTION_FILE"], "rb") as f:
-                file_content = f.read()
-            
-            success, commit_url = save_file_to_github(
-                file_content,
-                st.session_state.get('file_sha'),
-                commit_message
-            )
-            if success:
-                st.success("✅ تم الحفظ على GitHub بنجاح")
-                # تحديث SHA بعد الحفظ
-                file_content, new_sha, file_url = get_file_from_github()
-                if new_sha:
-                    st.session_state.file_sha = new_sha
-                    st.session_state.file_url = file_url
-                return True, commit_url
-            else:
-                st.error("❌ فشل في الحفظ على GitHub")
-                return False, None
-        
-        return True, None
-        
+        return True
     except Exception as e:
-        st.error(f"❌ خطأ في حفظ البيانات: {e}")
-        return False, None
+        st.error(f"⚠ فشل التحديث من GitHub: {e}")
+        return False
 
-def update_sheet_data(sheet_name, updated_df):
-    """تحديث بيانات شيت معين مع الحفظ التلقائي على GitHub"""
+def fetch_from_github_api():
+    """تحميل عبر GitHub API (باستخدام PyGithub token في secrets)"""
+    if not GITHUB_AVAILABLE:
+        return fetch_from_github_requests()
+    
     try:
-        # تحميل البيانات الحالية
-        sheets_data = load_production_data()
+        token = st.secrets.get("github", {}).get("token", None)
+        if not token:
+            return fetch_from_github_requests()
         
-        # تحديث الـ DataFrame المطلوب
-        sheets_data[sheet_name] = updated_df
-        
-        # حفظ تلقائي مع رسالة مخصصة
-        commit_message = f"تحديث: {sheet_name} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        return save_production_data(sheets_data, commit_message)
+        g = Github(token)
+        repo = g.get_repo(APP_CONFIG["REPO_NAME"])
+        file_content = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
+        content = b64decode(file_content.content)
+        with open(APP_CONFIG["LOCAL_FILE"], "wb") as f:
+            f.write(content)
+        try:
+            st.cache_data.clear()
+        except:
+            pass
+        return True
     except Exception as e:
-        st.error(f"❌ خطأ في تحديث البيانات: {e}")
-        return False, None
+        st.error(f"⚠ فشل تحميل الملف من GitHub: {e}")
+        return False
 
 # -------------------------------
-# 🧮 دوال مساعدة للنظام
+# 📂 تحميل الشيتات (مخبأ) - معدل لقراءة جميع الشيتات
+# -------------------------------
+@st.cache_data(show_spinner=False)
+def load_all_sheets():
+    """تحميل جميع الشيتات من ملف Excel"""
+    if not os.path.exists(APP_CONFIG["LOCAL_FILE"]):
+        return None
+    
+    try:
+        # قراءة جميع الشيتات
+        sheets = pd.read_excel(APP_CONFIG["LOCAL_FILE"], sheet_name=None)
+        
+        if not sheets:
+            return None
+        
+        # تنظيف أسماء الأعمدة لكل شيت
+        for name, df in sheets.items():
+            df.columns = df.columns.astype(str).str.strip()
+        
+        return sheets
+    except Exception as e:
+        return None
+
+# نسخة مع dtype=object لواجهة التحرير
+@st.cache_data(show_spinner=False)
+def load_sheets_for_edit():
+    """تحميل جميع الشيتات للتحرير"""
+    if not os.path.exists(APP_CONFIG["LOCAL_FILE"]):
+        return None
+    
+    try:
+        # قراءة جميع الشيتات مع dtype=object للحفاظ على تنسيق البيانات
+        sheets = pd.read_excel(APP_CONFIG["LOCAL_FILE"], sheet_name=None, dtype=object)
+        
+        if not sheets:
+            return None
+        
+        # تنظيف أسماء الأعمدة لكل شيت
+        for name, df in sheets.items():
+            df.columns = df.columns.astype(str).str.strip()
+        
+        return sheets
+    except Exception as e:
+        return None
+
+# -------------------------------
+# 🔁 حفظ محلي + رفع على GitHub + مسح الكاش + إعادة تحميل - مثل CMMS
+# -------------------------------
+def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit"):
+    """دالة محسنة للحفظ التلقائي المحلي والرفع إلى GitHub"""
+    # احفظ محلياً
+    try:
+        with pd.ExcelWriter(APP_CONFIG["LOCAL_FILE"], engine="openpyxl") as writer:
+            for name, sh in sheets_dict.items():
+                try:
+                    sh.to_excel(writer, sheet_name=name, index=False)
+                except Exception:
+                    sh.astype(object).to_excel(writer, sheet_name=name, index=False)
+    except Exception as e:
+        st.error(f"⚠ خطأ أثناء الحفظ المحلي: {e}")
+        return None
+
+    # امسح الكاش
+    try:
+        st.cache_data.clear()
+    except:
+        pass
+
+    # حاول الرفع عبر PyGithub token في secrets
+    token = st.secrets.get("github", {}).get("token", None)
+    if not token:
+        st.warning("⚠ لم يتم العثور على GitHub token. سيتم الحفظ محلياً فقط.")
+        return load_sheets_for_edit()
+
+    if not GITHUB_AVAILABLE:
+        st.warning("⚠ PyGithub غير متوفر. سيتم الحفظ محلياً فقط.")
+        return load_sheets_for_edit()
+
+    try:
+        g = Github(token)
+        repo = g.get_repo(APP_CONFIG["REPO_NAME"])
+        with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
+            content = f.read()
+
+        try:
+            contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
+            result = repo.update_file(path=APP_CONFIG["FILE_PATH"], message=commit_message, content=content, sha=contents.sha, branch=APP_CONFIG["BRANCH"])
+            st.success(f"✅ تم الحفظ والرفع إلى GitHub بنجاح: {commit_message}")
+            return load_sheets_for_edit()
+        except Exception as e:
+            # حاول رفع كملف جديد أو إنشاء
+            try:
+                result = repo.create_file(path=APP_CONFIG["FILE_PATH"], message=commit_message, content=content, branch=APP_CONFIG["BRANCH"])
+                st.success(f"✅ تم إنشاء ملف جديد على GitHub: {commit_message}")
+                return load_sheets_for_edit()
+            except Exception as create_error:
+                st.error(f"❌ فشل إنشاء ملف جديد على GitHub: {create_error}")
+                return None
+
+    except Exception as e:
+        st.error(f"❌ فشل الرفع إلى GitHub: {e}")
+        return None
+
+def auto_save_to_github(sheets_dict, operation_description):
+    """دالة الحفظ التلقائي المحسنة"""
+    username = st.session_state.get("username", "unknown")
+    commit_message = f"{operation_description} by {username} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    
+    result = save_local_excel_and_push(sheets_dict, commit_message)
+    if result is not None:
+        st.success("✅ تم حفظ التغييرات تلقائياً في GitHub")
+        return result
+    else:
+        st.error("❌ فشل الحفظ التلقائي")
+        return sheets_dict
+
+# -------------------------------
+# 🧰 دوال مساعدة للمعالجة والنصوص
 # -------------------------------
 def get_user_permissions(user_role, user_permissions):
     """الحصول على صلاحيات المستخدم - جميع المستخدمين لديهم جميع الصلاحيات"""
@@ -454,9 +413,9 @@ def get_user_permissions(user_role, user_permissions):
 def create_backup():
     """إنشاء نسخة احتياطية من الملف"""
     try:
-        if os.path.exists(APP_CONFIG["LOCAL_PRODUCTION_FILE"]):
+        if os.path.exists(APP_CONFIG["LOCAL_FILE"]):
             backup_name = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            shutil.copy2(APP_CONFIG["LOCAL_PRODUCTION_FILE"], backup_name)
+            shutil.copy2(APP_CONFIG["LOCAL_FILE"], backup_name)
             return backup_name
         return None
     except Exception as e:
@@ -515,7 +474,7 @@ with st.sidebar:
     st.success("✅ الحفظ التلقائي مفعّل - سيتم حفظ جميع التغييرات تلقائياً على GitHub")
     
     if st.button("🔄 تحديث الملف من GitHub", use_container_width=True):
-        if fetch_production_from_github():
+        if fetch_from_github_requests():
             st.success("✅ تم تحديث البيانات بنجاح")
             st.rerun()
         else:
@@ -540,15 +499,11 @@ with st.sidebar:
     
     # معلومات النظام
     st.header("ℹ معلومات النظام")
-    production_data = load_production_data()
+    production_data = load_all_sheets()
     if production_data:
         total_sheets = len(production_data)
         total_rows = sum(len(df) for df in production_data.values())
         st.info(f"📊 إحصائيات:\n- الأوراق: {total_sheets}\n- الصفوف: {total_rows}")
-    
-    # معلومات GitHub
-    if st.session_state.get('file_sha'):
-        st.info(f"📎 ملف GitHub جاهز للحفظ")
     
     st.markdown("---")
     
@@ -556,7 +511,8 @@ with st.sidebar:
         logout_action()
 
 # تحميل البيانات
-production_data = load_production_data()
+production_data = load_all_sheets()
+sheets_edit = load_sheets_for_edit()
 
 # واجهة التبويبات الرئيسية
 st.title(f"{APP_CONFIG['APP_ICON']} {APP_CONFIG['APP_TITLE']}")
@@ -576,7 +532,7 @@ with tabs[0]:
     if not production_data:
         st.warning("⚠ لا توجد بيانات متاحة. يرجى تحديث الملف من GitHub أو إضافة بيانات جديدة.")
     else:
-        available_sheets = get_all_sheets()
+        available_sheets = list(production_data.keys())
         selected_sheet = st.selectbox(
             "📋 اختر المحطة أو القسم:",
             available_sheets,
@@ -662,15 +618,15 @@ with tabs[0]:
                 st.warning("⚠ لا توجد أعمدة محددة للعرض.")
 
 # -------------------------------
-# Tab 2: تعديل البيانات مع الحفظ التلقائي الفوري
+# Tab 2: تعديل البيانات مع الحفظ التلقائي الفوري - معدل ليعمل مثل CMMS
 # -------------------------------
 with tabs[1]:
     st.header("✏ تعديل بيانات المحطات")
     
-    if not production_data:
+    if not sheets_edit:
         st.warning("⚠ لا توجد بيانات متاحة. يرجى تحديث الملف من GitHub.")
     else:
-        available_sheets = get_all_sheets()
+        available_sheets = list(sheets_edit.keys())
         selected_sheet = st.selectbox(
             "📋 اختر المحطة أو القسم للتعديل:",
             available_sheets,
@@ -679,7 +635,7 @@ with tabs[1]:
         
         if selected_sheet:
             # تحميل البيانات الأصلية
-            original_df = production_data[selected_sheet]
+            original_df = sheets_edit[selected_sheet]
             
             st.subheader(f"تعديل بيانات {selected_sheet}")
             
@@ -696,9 +652,6 @@ with tabs[1]:
             # إعادة ترتيب الأعمدة لوضع الإلزامية أولاً
             ordered_columns = mandatory_columns + [col for col in all_columns if col not in mandatory_columns]
             df_reordered = original_df[ordered_columns]
-            
-            # تأكد من أن جميع البيانات هي نصية
-            df_reordered = df_reordered.astype(str)
             
             # محرر البيانات
             edited_df = st.data_editor(
@@ -723,15 +676,15 @@ with tabs[1]:
                     # التحقق من وجود تغييرات
                     if detect_dataframe_changes(df_reordered, edited_df):
                         with st.spinner("جاري الحفظ على GitHub..."):
-                            success, commit_url = update_sheet_data(selected_sheet, edited_df)
-                            if success:
+                            sheets_edit[selected_sheet] = edited_df
+                            new_sheets = auto_save_to_github(
+                                sheets_edit,
+                                f"تعديل تلقائي في شيت {selected_sheet}"
+                            )
+                            if new_sheets is not None:
+                                sheets_edit = new_sheets
                                 st.success("✅ تم الحفظ بنجاح على GitHub")
-                                if commit_url:
-                                    st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
-                                # تحديث البيانات المعروضة
                                 st.rerun()
-                            else:
-                                st.error("❌ فشل في الحفظ على GitHub")
                     else:
                         st.info("⚠ لم يتم إجراء أي تغييرات للحفظ")
             
@@ -803,11 +756,14 @@ with tabs[1]:
                         
                         new_df = pd.concat([edited_df, pd.DataFrame([new_row_data])], ignore_index=True)
                         with st.spinner("جاري إضافة الصف والحفظ على GitHub..."):
-                            success, commit_url = update_sheet_data(selected_sheet, new_df)
-                            if success:
+                            sheets_edit[selected_sheet] = new_df
+                            new_sheets = auto_save_to_github(
+                                sheets_edit,
+                                f"إضافة صف جديد في {selected_sheet}"
+                            )
+                            if new_sheets is not None:
+                                sheets_edit = new_sheets
                                 st.success("✅ تم إضافة الصف الجديد والحفظ بنجاح")
-                                if commit_url:
-                                    st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
                                 st.rerun()
                     else:
                         st.warning("⚠ يرجى إدخال بيانات في الحقول")
@@ -904,7 +860,7 @@ with tabs[3]:
     st.markdown("### 🔧 أدوات فنية")
     
     if st.button("فحص اتصال GitHub", use_container_width=True):
-        if fetch_production_from_github():
+        if fetch_from_github_requests():
             st.success("✅ الاتصال مع GitHub يعمل بشكل صحيح")
         else:
             st.error("❌ هناك مشكلة في الاتصال مع GitHub")
@@ -914,7 +870,7 @@ with tabs[3]:
         st.json(APP_CONFIG)
         
         if st.button("فحص متغيرات البيئة"):
-            github_token = os.getenv('GITHUB_TOKEN')
+            github_token = st.secrets.get("github", {}).get("token", None)
             if github_token:
                 st.success("✅ متغير GITHUB_TOKEN موجود")
                 st.code(f"الرمز: {'*' * len(github_token)}")
@@ -932,14 +888,3 @@ with footer_col2:
     st.caption(f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 with footer_col3:
     st.caption("مصنع بيل يارن للغزل © 2024")
-
-# تهيئة session state إذا لزم الأمر
-if 'file_sha' not in st.session_state:
-    # محاولة جلب SHA من GitHub عند بدء التشغيل
-    file_content, file_sha, file_url = get_file_from_github()
-    if file_sha:
-        st.session_state.file_sha = file_sha
-        st.session_state.file_url = file_url
-    else:
-        st.session_state.file_sha = None
-        st.session_state.file_url = None

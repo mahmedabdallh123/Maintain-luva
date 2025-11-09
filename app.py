@@ -345,6 +345,8 @@ def load_production_data():
         
         for sheet_name in excel_file.sheet_names:
             df = pd.read_excel(APP_CONFIG["LOCAL_PRODUCTION_FILE"], sheet_name=sheet_name)
+            # تحويل جميع الأعمدة إلى نص لتجنب مشاكل st.data_editor
+            df = df.astype(str)
             sheets_data[sheet_name] = df
         
         return sheets_data
@@ -694,6 +696,9 @@ with tabs[1]:
             # إعادة ترتيب الأعمدة لوضع الإلزامية أولاً
             ordered_columns = mandatory_columns + [col for col in all_columns if col not in mandatory_columns]
             df_reordered = original_df[ordered_columns]
+            
+            # تأكد من أن جميع البيانات هي نصية
+            df_reordered = df_reordered.astype(str)
             
             # محرر البيانات
             edited_df = st.data_editor(

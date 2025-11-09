@@ -32,15 +32,15 @@ APP_CONFIG = {
     "LOCAL_PRODUCTION_FILE": "station.xlsx",
     
     # إعدادات الأمان
-    "MAX_ACTIVE_USERS": 3,
-    "SESSION_DURATION_MINUTES": 15,
+    "MAX_ACTIVE_USERS": 10,
+    "SESSION_DURATION_MINUTES": 240,
     
     # إعدادات الواجهة
     "SHOW_TECH_SUPPORT_TO_ALL": True,
     "CUSTOM_TABS": ["📊 عرض المحطات", "✏ تعديل البيانات", "👥 إدارة المستخدمين", "📞 الدعم الفني"],
     
     # إعدادات الحفظ التلقائي
-    "AUTO_SAVE": True
+    "AUTO_SAVE": True  # تفعيل الحفظ التلقائي افتراضياً
 }
 
 # ===============================
@@ -407,17 +407,14 @@ def save_production_data(sheets_data, commit_message="تحديث بيانات م
         st.error(f"❌ خطأ في حفظ البيانات: {e}")
         return False, None
 
-def update_sheet_data(sheet_name, updated_df, auto_save=False):
-    """تحديث بيانات شيت معين"""
+def update_sheet_data(sheet_name, updated_df):
+    """تحديث بيانات شيت معين مع الحفظ التلقائي على GitHub"""
     sheets_data = load_production_data()
     sheets_data[sheet_name] = updated_df
     
-    if auto_save and APP_CONFIG["AUTO_SAVE"]:
-        # حفظ تلقائي مع رسالة مخصصة
-        commit_message = f"تحديث تلقائي: {sheet_name} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        return save_production_data(sheets_data, commit_message)
-    else:
-        return save_production_data(sheets_data, f"تحديث بيانات {sheet_name}")
+    # حفظ تلقائي مع رسالة مخصصة
+    commit_message = f"تحديث تلقائي: {sheet_name} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    return save_production_data(sheets_data, commit_message)
 
 # -------------------------------
 # 🧮 دوال مساعدة للنظام
@@ -468,12 +465,9 @@ with st.sidebar:
     st.markdown("---")
     st.header("🔧 أدوات النظام")
     
-    # إعدادات الحفظ التلقائي
+    # إعدادات الحفظ التلقائي (مفعّل دائماً)
     st.subheader("💾 إعدادات الحفظ")
-    auto_save = st.checkbox("الحفظ التلقائي على GitHub", value=APP_CONFIG["AUTO_SAVE"])
-    if auto_save != APP_CONFIG["AUTO_SAVE"]:
-        APP_CONFIG["AUTO_SAVE"] = auto_save
-        st.rerun()
+    st.success("✅ الحفظ التلقائي مفعّل - سيتم حفظ جميع التغييرات تلقائياً على GitHub")
     
     if st.button("🔄 تحديث الملف من GitHub", use_container_width=True):
         if fetch_production_from_github():
@@ -604,27 +598,11 @@ with tabs[0]:
             # عرض البيانات مع الأعمدة المحددة فقط
             if display_columns:
                 st.dataframe(df[display_columns], use_container_width=True, height=400)
-                
-                # خيارات التصفية النصية
-                st.subheader("🔍 تصفية البيانات")
-                text_columns = df[display_columns].select_dtypes(include=['object']).columns
-                if len(text_columns) > 0:
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        filter_column = st.selectbox("اختر عمود للتصفية:", text_columns)
-                    with col2:
-                        unique_values = df[filter_column].unique()
-                        selected_value = st.selectbox("اختر قيمة:", unique_values)
-                    
-                    if st.button("تطبيق التصفية"):
-                        filtered_df = df[df[filter_column] == selected_value]
-                        st.dataframe(filtered_df[display_columns], use_container_width=True)
-                        st.info(f"تم العثور على {len(filtered_df)} صف")
             else:
                 st.warning("⚠ لا توجد أعمدة محددة للعرض.")
 
 # -------------------------------
-# Tab 2: تعديل البيانات مع السماح بجميع أنواع المدخلات
+# Tab 2: تعديل البيانات مع الحفظ التلقائي الفوري
 # -------------------------------
 with tabs[1]:
     st.header("✏ تعديل بيانات المحطات")
@@ -645,17 +623,15 @@ with tabs[1]:
             st.subheader(f"تعديل بيانات {selected_sheet}")
             
             # عرض حالة الحفظ التلقائي
-            if APP_CONFIG["AUTO_SAVE"]:
-                st.success("💾 الحفظ التلقائي مفعل - سيتم حفظ التغييرات تلقائياً على GitHub")
-            else:
-                st.warning("⚠ الحفظ التلقائي معطل - استخدم زر 'حفظ التغييرات' لحفظ التعديلات")
+            st.success("💾 الحفظ التلقائي مفعّل - سيتم حفظ جميع التغييرات تلقائياً على GitHub")
             
-            # استخدام محرر البيانات مع السماح بجميع أنواع المدخلات
-            st.info("💡 يمكنك إدخال أي نوع من البيانات: نصوص، أرقام، تواريخ، إلخ.")
+            # استخدام محرر البيانات مع الحفظ التلقائي الفوري
+            st.info("💡 أي تغيير تقوم به سيتم حفظه تلقائياً على GitHub")
             
             # تحويل جميع الأعمدة إلى نص لضمان قبول جميع أنواع المدخلات
             df_for_edit = df.astype(str)
             
+            # محرر البيانات مع الحفظ التلقائي
             edited_df = st.data_editor(
                 df_for_edit,
                 use_container_width=True,
@@ -670,45 +646,26 @@ with tabs[1]:
                 }
             )
             
-            # التحقق إذا كانت هناك تغييرات
+            # التحقق إذا كانت هناك تغييرات وحفظها تلقائياً
             if not edited_df.equals(df_for_edit):
-                st.info("🔄 هناك تغييرات غير محفوظة")
-                
-                # إذا كان الحفظ التلقائي مفعل، احفظ فوراً
-                if APP_CONFIG["AUTO_SAVE"]:
-                    with st.spinner("جاري الحفظ التلقائي على GitHub..."):
-                        # تحويل البيانات المحررة إلى DataFrame نهائي
-                        final_df = edited_df
-                        success, commit_url = update_sheet_data(selected_sheet, final_df, auto_save=True)
-                        if success:
-                            st.success("✅ تم الحفظ التلقائي بنجاح على GitHub")
-                            if commit_url:
-                                st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
-                            st.rerun()
-                        else:
-                            st.error("❌ فشل في الحفظ التلقائي")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                commit_message = st.text_input("رسالة الحفظ", value=f"تحديث يدوي: {selected_sheet}")
-                
-                if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True):
-                    final_df = edited_df
-                    success, commit_url = update_sheet_data(selected_sheet, final_df, auto_save=False)
+                with st.spinner("جاري الحفظ التلقائي على GitHub..."):
+                    success, commit_url = update_sheet_data(selected_sheet, edited_df)
                     if success:
-                        st.success("✅ تم حفظ التغييرات بنجاح")
+                        st.success("✅ تم الحفظ التلقائي بنجاح على GitHub")
                         if commit_url:
                             st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
+                        # تحديث البيانات المعروضة
                         st.rerun()
                     else:
-                        st.error("❌ فشل في حفظ التغييرات")
+                        st.error("❌ فشل في الحفظ التلقائي")
             
-            with col2:
-                if st.button("🔄 إعادة تحميل", use_container_width=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🔄 إعادة تحميل البيانات", use_container_width=True):
                     st.rerun()
             
-            with col3:
+            with col2:
                 if st.button("📥 تصدير البيانات", use_container_width=True):
                     buffer = io.BytesIO()
                     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -722,10 +679,10 @@ with tabs[1]:
                         use_container_width=True
                     )
             
-            # إضافة صف جديد مع السماح بجميع أنواع المدخلات
+            # إضافة صف جديد مع الحفظ التلقائي
             st.subheader("➕ إضافة بيانات جديدة")
             with st.form(f"add_row_form_{selected_sheet}"):
-                st.write("املأ البيانات الجديدة (يمكنك إدخال أي نوع من البيانات):")
+                st.write("املأ البيانات الجديدة (سيتم الحفظ تلقائياً):")
                 new_row_data = {}
                 cols = st.columns(min(4, len(df.columns)))
                 
@@ -740,19 +697,18 @@ with tabs[1]:
                             help=f"أدخل أي قيمة لـ {column}"
                         )
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.form_submit_button("إضافة صف جديد", use_container_width=True):
-                        if any(new_row_data.values()):
-                            new_df = pd.concat([edited_df, pd.DataFrame([new_row_data])], ignore_index=True)
-                            success, commit_url = update_sheet_data(selected_sheet, new_df, auto_save=APP_CONFIG["AUTO_SAVE"])
+                if st.form_submit_button("إضافة صف جديد", use_container_width=True):
+                    if any(new_row_data.values()):
+                        new_df = pd.concat([edited_df, pd.DataFrame([new_row_data])], ignore_index=True)
+                        with st.spinner("جاري إضافة الصف والحفظ على GitHub..."):
+                            success, commit_url = update_sheet_data(selected_sheet, new_df)
                             if success:
-                                st.success("✅ تم إضافة الصف الجديد بنجاح")
+                                st.success("✅ تم إضافة الصف الجديد والحفظ بنجاح")
                                 if commit_url:
                                     st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
                                 st.rerun()
-                        else:
-                            st.warning("⚠ يرجى إدخال بيانات في الحقول")
+                    else:
+                        st.warning("⚠ يرجى إدخال بيانات في الحقول")
 
 # -------------------------------
 # Tab 3: إدارة المستخدمين
@@ -827,19 +783,18 @@ with tabs[3]:
     
     st.markdown("---")
     st.markdown("### إصدار النظام:")
-    st.markdown("- الإصدار: 2.4")
+    st.markdown("- الإصدار: 3.0")
     st.markdown("- آخر تحديث: 2024")
     st.markdown("- النظام: نظام إدارة محطات الإنتاج")
     
     st.markdown("---")
-    st.info("""
-    *ملاحظات مهمة:*
-    - النظام يدعم جميع أنواع ملفات Excel متعددة الشيتات
-    - يمكن عرض وتعديل أي شيت تلقائياً دون الحاجة لتحديد الأعمدة
-    - البيانات تحفظ تلقائياً على GitHub للنسخ الاحتياطي
-    - يمكن تصدير البيانات بأي وقت كملف Excel
-    - جميع المستخدمين لديهم صلاحيات كاملة
-    - يمكن إدخال أي نوع من البيانات في الجداول (نصوص، أرقام، إلخ)
+    st.success("""
+    *مميزات النظام:*
+    - ✅ الحفظ التلقائي الفوري على GitHub
+    - ✅ عرض وتعديل البيانات من أي مكان
+    - ✅ دعم كامل للغة العربية
+    - ✅ إدارة مستخدمين متعددة
+    - ✅ نسخ احتياطي تلقائي
     """)
     
     # أزرار فنية

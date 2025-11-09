@@ -32,12 +32,12 @@ APP_CONFIG = {
     "LOCAL_PRODUCTION_FILE": "station.xlsx",
     
     # إعدادات الأمان
-    "MAX_ACTIVE_USERS": 10,
-    "SESSION_DURATION_MINUTES": 240,
+    "MAX_ACTIVE_USERS": 3,
+    "SESSION_DURATION_MINUTES": 15,
     
     # إعدادات الواجهة
     "SHOW_TECH_SUPPORT_TO_ALL": True,
-    "CUSTOM_TABS": ["📊 عرض المحطات", "✏ تعديل البيانات", "📈 الإحصائيات", "👥 إدارة المستخدمين", "📞 الدعم الفني"],
+    "CUSTOM_TABS": ["📊 عرض المحطات", "✏ تعديل البيانات", "👥 إدارة المستخدمين", "📞 الدعم الفني"],
     
     # إعدادات الحفظ التلقائي
     "AUTO_SAVE": True
@@ -431,33 +431,6 @@ def get_user_permissions(user_role, user_permissions):
         "can_see_tech_support": True
     }
 
-def generate_sheet_statistics(df, sheet_name):
-    """توليد إحصائيات للشيت المحدد"""
-    if df.empty:
-        return pd.DataFrame()
-    
-    stats = {
-        'المعيار': ['عدد الصفوف', 'عدد الأعمدة', 'البيانات غير الفارغة'],
-        'القيمة': [len(df), len(df.columns), df.count().sum()]
-    }
-    
-    numeric_columns = df.select_dtypes(include=['number']).columns
-    if len(numeric_columns) > 0:
-        for col in numeric_columns:
-            if pd.api.types.is_numeric_dtype(df[col]):
-                try:
-                    stats['المعيار'].extend([f'متوسط {col}', f'أقل {col}', f'أعلى {col}', f'مجموع {col}'])
-                    stats['القيمة'].extend([
-                        df[col].mean().round(2),
-                        df[col].min(),
-                        df[col].max(),
-                        df[col].sum()
-                    ])
-                except:
-                    continue
-    
-    return pd.DataFrame(stats)
-
 def create_backup():
     """إنشاء نسخة احتياطية من الملف"""
     try:
@@ -651,7 +624,7 @@ with tabs[0]:
                 st.warning("⚠ لا توجد أعمدة محددة للعرض.")
 
 # -------------------------------
-# Tab 2: تعديل البيانات مع الحفظ التلقائي
+# Tab 2: تعديل البيانات مع السماح بجميع أنواع المدخلات
 # -------------------------------
 with tabs[1]:
     st.header("✏ تعديل بيانات المحطات")
@@ -677,24 +650,36 @@ with tabs[1]:
             else:
                 st.warning("⚠ الحفظ التلقائي معطل - استخدم زر 'حفظ التغييرات' لحفظ التعديلات")
             
-            # استخدام محرر البيانات مع التتبع التلقائي للتغييرات
+            # استخدام محرر البيانات مع السماح بجميع أنواع المدخلات
+            st.info("💡 يمكنك إدخال أي نوع من البيانات: نصوص، أرقام، تواريخ، إلخ.")
+            
+            # تحويل جميع الأعمدة إلى نص لضمان قبول جميع أنواع المدخلات
+            df_for_edit = df.astype(str)
+            
             edited_df = st.data_editor(
-                df,
+                df_for_edit,
                 use_container_width=True,
                 height=500,
                 num_rows="dynamic",
                 key=f"editor_{selected_sheet}",
-                on_change=None
+                column_config={
+                    col: st.column_config.TextColumn(
+                        col,
+                        help=f"يمكنك إدخال أي نوع من البيانات في عمود {col}"
+                    ) for col in df_for_edit.columns
+                }
             )
             
             # التحقق إذا كانت هناك تغييرات
-            if not edited_df.equals(df):
+            if not edited_df.equals(df_for_edit):
                 st.info("🔄 هناك تغييرات غير محفوظة")
                 
                 # إذا كان الحفظ التلقائي مفعل، احفظ فوراً
                 if APP_CONFIG["AUTO_SAVE"]:
                     with st.spinner("جاري الحفظ التلقائي على GitHub..."):
-                        success, commit_url = update_sheet_data(selected_sheet, edited_df, auto_save=True)
+                        # تحويل البيانات المحررة إلى DataFrame نهائي
+                        final_df = edited_df
+                        success, commit_url = update_sheet_data(selected_sheet, final_df, auto_save=True)
                         if success:
                             st.success("✅ تم الحفظ التلقائي بنجاح على GitHub")
                             if commit_url:
@@ -709,7 +694,8 @@ with tabs[1]:
                 commit_message = st.text_input("رسالة الحفظ", value=f"تحديث يدوي: {selected_sheet}")
                 
                 if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True):
-                    success, commit_url = update_sheet_data(selected_sheet, edited_df, auto_save=False)
+                    final_df = edited_df
+                    success, commit_url = update_sheet_data(selected_sheet, final_df, auto_save=False)
                     if success:
                         st.success("✅ تم حفظ التغييرات بنجاح")
                         if commit_url:
@@ -736,27 +722,23 @@ with tabs[1]:
                         use_container_width=True
                     )
             
-            # إضافة صف جديد مع حفظ تلقائي
+            # إضافة صف جديد مع السماح بجميع أنواع المدخلات
             st.subheader("➕ إضافة بيانات جديدة")
             with st.form(f"add_row_form_{selected_sheet}"):
-                st.write("املأ البيانات الجديدة:")
+                st.write("املأ البيانات الجديدة (يمكنك إدخال أي نوع من البيانات):")
                 new_row_data = {}
                 cols = st.columns(min(4, len(df.columns)))
                 
                 for i, column in enumerate(df.columns):
                     col_idx = i % 4
                     with cols[col_idx]:
-                        if df[column].dtype in ['int64', 'float64']:
-                            new_row_data[column] = st.number_input(
-                                f"{column}:",
-                                value=0.0,
-                                key=f"new_{column}_{selected_sheet}"
-                            )
-                        else:
-                            new_row_data[column] = st.text_input(
-                                f"{column}:",
-                                key=f"new_{column}_{selected_sheet}"
-                            )
+                        # استخدام حقل نصي لجميع الأعمدة للسماح بجميع أنواع المدخلات
+                        new_row_data[column] = st.text_input(
+                            f"{column}:",
+                            value="",
+                            key=f"new_{column}_{selected_sheet}",
+                            help=f"أدخل أي قيمة لـ {column}"
+                        )
                 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -773,44 +755,9 @@ with tabs[1]:
                             st.warning("⚠ يرجى إدخال بيانات في الحقول")
 
 # -------------------------------
-# Tab 3: الإحصائيات
+# Tab 3: إدارة المستخدمين
 # -------------------------------
 with tabs[2]:
-    st.header("📈 إحصائيات المحطات")
-    
-    if not production_data:
-        st.warning("⚠ لا توجد بيانات متاحة.")
-    else:
-        available_sheets = get_all_sheets()
-        selected_sheet = st.selectbox(
-            "📋 اختر المحطة أو القسم للإحصائيات:",
-            available_sheets,
-            key="stats_sheet_select"
-        )
-        
-        if selected_sheet:
-            df = production_data[selected_sheet]
-            
-            st.subheader(f"إحصائيات {selected_sheet}")
-            
-            stats = {
-                'المعيار': ['عدد الصفوف', 'عدد الأعمدة', 'البيانات غير الفارغة'],
-                'القيمة': [len(df), len(df.columns), df.count().sum()]
-            }
-            
-            numeric_columns = df.select_dtypes(include=['number']).columns
-            text_columns = df.select_dtypes(include=['object']).columns
-            
-            stats['المعيار'].extend(['الأعمدة الرقمية', 'الأعمدة النصية'])
-            stats['القيمة'].extend([len(numeric_columns), len(text_columns)])
-            
-            stats_df = pd.DataFrame(stats)
-            st.dataframe(stats_df, use_container_width=True)
-
-# -------------------------------
-# Tab 4: إدارة المستخدمين
-# -------------------------------
-with tabs[3]:
     st.header("👥 إدارة المستخدمين")
     
     users = load_users()
@@ -862,55 +809,47 @@ with tabs[3]:
                 st.rerun()
 
 # -------------------------------
-# Tab 5: الدعم الفني
+# Tab 4: الدعم الفني
 # -------------------------------
-with tabs[4]:
+with tabs[3]:
     st.header("📞 الدعم الفني")
     
-    col1, col2 = st.columns(2)
+    st.markdown("## 🛠 معلومات التطوير والدعم")
+    st.markdown("تم تطوير هذا التطبيق بواسطة:")
+    st.markdown("### م. محمد عبدالله")
+    st.markdown("### رئيس قسم الكرد والمحطات")
+    st.markdown("### مصنع بيل يارن للغزل")
     
-    with col1:
-        st.markdown("## 🛠 معلومات التطوير والدعم")
-        st.markdown("تم تطوير هذا التطبيق بواسطة:")
-        st.markdown("### م. محمد عبدالله")
-        st.markdown("### رئيس قسم الكرد والمحطات")
-        st.markdown("### مصنع بيل يارن للغزل")
-        
-        st.markdown("---")
-        st.markdown("### معلومات الاتصال:")
-        st.markdown("- 📧 البريد الإلكتروني: m.abdallah@bailyarn.com")
-        st.markdown("- 📞 هاتف المصنع: 01000000000")
-        
-        st.markdown("---")
-        st.markdown("### إصدار النظام:")
-        st.markdown("- الإصدار: 2.3")
-        st.markdown("- آخر تحديث: 2024")
-        st.markdown("- النظام: نظام إدارة محطات الإنتاج")
+    st.markdown("---")
+    st.markdown("### معلومات الاتصال:")
+    st.markdown("- 📧 البريد الإلكتروني: m.abdallah@bailyarn.com")
+    st.markdown("- 📞 هاتف المصنع: 01000000000")
     
-    with col2:
-        st.markdown("## 📊 حالة النظام")
-        
-        system_info = {
-            "المعيار": ["عدد الأوراق", "إجمالي الصفوف", "عدد المستخدمين", "حالة GitHub", "الحفظ التلقائي"],
-            "القيمة": [
-                len(production_data) if production_data else 0,
-                sum(len(df) for df in production_data.values()) if production_data else 0,
-                len(users),
-                "✅ متصل" if st.session_state.get('file_sha') else "❌ غير متصل",
-                "✅ مفعل" if APP_CONFIG["AUTO_SAVE"] else "❌ معطل"
-            ]
-        }
-        
-        system_df = pd.DataFrame(system_info)
-        st.dataframe(system_df, use_container_width=True)
-        
-        st.markdown("### 🔧 أدوات فنية")
-        
-        if st.button("فحص اتصال GitHub", use_container_width=True):
-            if fetch_production_from_github():
-                st.success("✅ الاتصال مع GitHub يعمل بشكل صحيح")
-            else:
-                st.error("❌ هناك مشكلة في الاتصال مع GitHub")
+    st.markdown("---")
+    st.markdown("### إصدار النظام:")
+    st.markdown("- الإصدار: 2.4")
+    st.markdown("- آخر تحديث: 2024")
+    st.markdown("- النظام: نظام إدارة محطات الإنتاج")
+    
+    st.markdown("---")
+    st.info("""
+    *ملاحظات مهمة:*
+    - النظام يدعم جميع أنواع ملفات Excel متعددة الشيتات
+    - يمكن عرض وتعديل أي شيت تلقائياً دون الحاجة لتحديد الأعمدة
+    - البيانات تحفظ تلقائياً على GitHub للنسخ الاحتياطي
+    - يمكن تصدير البيانات بأي وقت كملف Excel
+    - جميع المستخدمين لديهم صلاحيات كاملة
+    - يمكن إدخال أي نوع من البيانات في الجداول (نصوص، أرقام، إلخ)
+    """)
+    
+    # أزرار فنية
+    st.markdown("### 🔧 أدوات فنية")
+    
+    if st.button("فحص اتصال GitHub", use_container_width=True):
+        if fetch_production_from_github():
+            st.success("✅ الاتصال مع GitHub يعمل بشكل صحيح")
+        else:
+            st.error("❌ هناك مشكلة في الاتصال مع GitHub")
 
 # -------------------------------
 # تذييل الصفحة

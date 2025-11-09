@@ -375,6 +375,8 @@ def save_production_data(sheets_data, commit_message="تحديث بيانات م
             for sheet_name, df in sheets_data.items():
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
         
+        st.success("✅ تم الحفظ المحلي بنجاح")
+        
         # امسح الكاش
         try:
             st.cache_data.clear()
@@ -383,23 +385,34 @@ def save_production_data(sheets_data, commit_message="تحديث بيانات م
 
         # الحفظ على GitHub إذا كان هناك token
         github_token = os.getenv('GITHUB_TOKEN')
-        if github_token and 'file_sha' in st.session_state:
+        if github_token:
+            if 'file_sha' not in st.session_state:
+                # إذا لم يكن هناك SHA، نحاول جلب الملف أولاً للحصول على SHA
+                file_content, file_sha, file_url = get_file_from_github()
+                if file_sha:
+                    st.session_state.file_sha = file_sha
+                else:
+                    st.warning("⚠ لا يمكن الحصول على SHA للملف. سيتم محاولة الإنشاء جديد.")
+            
             # قراءة الملف المحفوظ حديثاً وإرساله إلى GitHub
             with open(APP_CONFIG["LOCAL_PRODUCTION_FILE"], "rb") as f:
                 file_content = f.read()
             
             success, commit_url = save_file_to_github(
                 file_content,
-                st.session_state.file_sha,
+                st.session_state.get('file_sha'),
                 commit_message
             )
             if success:
+                st.success("✅ تم الحفظ على GitHub بنجاح")
                 # تحديث SHA بعد الحفظ
                 file_content, new_sha, file_url = get_file_from_github()
                 if new_sha:
                     st.session_state.file_sha = new_sha
+                    st.session_state.file_url = file_url
                 return True, commit_url
             else:
+                st.error("❌ فشل في الحفظ على GitHub")
                 return False, None
         
         return True, None
@@ -410,12 +423,16 @@ def save_production_data(sheets_data, commit_message="تحديث بيانات م
 
 def update_sheet_data(sheet_name, updated_df):
     """تحديث بيانات شيت معين مع الحفظ التلقائي على GitHub"""
-    sheets_data = load_production_data()
-    sheets_data[sheet_name] = updated_df
-    
-    # حفظ تلقائي مع رسالة مخصصة
-    commit_message = f"تحديث تلقائي: {sheet_name} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    return save_production_data(sheets_data, commit_message)
+    try:
+        sheets_data = load_production_data()
+        sheets_data[sheet_name] = updated_df
+        
+        # حفظ تلقائي مع رسالة مخصصة
+        commit_message = f"تحديث تلقائي: {sheet_name} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        return save_production_data(sheets_data, commit_message)
+    except Exception as e:
+        st.error(f"❌ خطأ في تحديث البيانات: {e}")
+        return False, None
 
 # -------------------------------
 # 🧮 دوال مساعدة للنظام
@@ -446,6 +463,20 @@ def separate_mandatory_columns(all_columns):
     mandatory_cols = [col for col in APP_CONFIG["MANDATORY_COLUMNS"] if col in all_columns]
     regular_cols = [col for col in all_columns if col not in APP_CONFIG["MANDATORY_COLUMNS"]]
     return mandatory_cols, regular_cols
+
+def detect_changes(original_df, edited_df):
+    """اكتشاف التغييرات بين DataFrame الأصلي والمعدل"""
+    try:
+        if original_df.shape != edited_df.shape:
+            return True
+        
+        # تحويل جميع القيم إلى سلسلة للمقارنة
+        original_str = original_df.astype(str)
+        edited_str = edited_df.astype(str)
+        
+        return not original_str.equals(edited_str)
+    except:
+        return True
 
 # -------------------------------
 # 🖥 الواجهة الرئيسية
@@ -507,6 +538,10 @@ with st.sidebar:
         total_sheets = len(production_data)
         total_rows = sum(len(df) for df in production_data.values())
         st.info(f"📊 إحصائيات:\n- الأوراق: {total_sheets}\n- الصفوف: {total_rows}")
+    
+    # معلومات GitHub
+    if st.session_state.get('file_sha'):
+        st.info(f"📎 ملف GitHub جاهز للحفظ")
     
     st.markdown("---")
     
@@ -672,18 +707,21 @@ with tabs[1]:
                 }
             )
             
-            # التحقق إذا كانت هناك تغييرات وحفظها تلقائياً
-            if not edited_df.equals(df_for_edit):
-                with st.spinner("جاري الحفظ التلقائي على GitHub..."):
-                    success, commit_url = update_sheet_data(selected_sheet, edited_df)
-                    if success:
-                        st.success("✅ تم الحفظ التلقائي بنجاح على GitHub")
-                        if commit_url:
-                            st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
-                        # تحديث البيانات المعروضة
-                        st.rerun()
-                    else:
-                        st.error("❌ فشل في الحفظ التلقائي")
+            # استخدام زر لحفظ التغييرات بدلاً من الحفظ التلقائي الفوري
+            if st.button("💾 حفظ التغييرات على GitHub", type="primary", use_container_width=True):
+                if detect_changes(df_for_edit, edited_df):
+                    with st.spinner("جاري الحفظ على GitHub..."):
+                        success, commit_url = update_sheet_data(selected_sheet, edited_df)
+                        if success:
+                            st.success("✅ تم الحفظ بنجاح على GitHub")
+                            if commit_url:
+                                st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
+                            # تحديث البيانات المعروضة
+                            st.rerun()
+                        else:
+                            st.error("❌ فشل في الحفظ على GitHub")
+                else:
+                    st.info("⚠ لم يتم إجراء أي تغييرات للحفظ")
             
             col1, col2 = st.columns(2)
             
@@ -748,7 +786,7 @@ with tabs[1]:
                                     help=f"أدخل أي قيمة لـ {column}"
                                 )
                 
-                if st.form_submit_button("إضافة صف جديد", use_container_width=True):
+                if st.form_submit_button("إضافة صف جديد وحفظ على GitHub", use_container_width=True):
                     if any(new_row_data.values()):
                         # التأكد من أن جميع الأعمدة موجودة في البيانات الجديدة
                         for col in ordered_columns:
@@ -862,6 +900,18 @@ with tabs[3]:
             st.success("✅ الاتصال مع GitHub يعمل بشكل صحيح")
         else:
             st.error("❌ هناك مشكلة في الاتصال مع GitHub")
+    
+    # عرض معلومات التكوين
+    with st.expander("🔧 إعدادات التطبيق"):
+        st.json(APP_CONFIG)
+        
+        if st.button("فحص متغيرات البيئة"):
+            github_token = os.getenv('GITHUB_TOKEN')
+            if github_token:
+                st.success("✅ متغير GITHUB_TOKEN موجود")
+                st.code(f"الرمز: {'*' * len(github_token)}")
+            else:
+                st.error("❌ متغير GITHUB_TOKEN غير موجود")
 
 # -------------------------------
 # تذييل الصفحة

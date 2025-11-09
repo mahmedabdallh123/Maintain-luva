@@ -424,11 +424,14 @@ def save_production_data(sheets_data, commit_message="تحديث بيانات م
 def update_sheet_data(sheet_name, updated_df):
     """تحديث بيانات شيت معين مع الحفظ التلقائي على GitHub"""
     try:
+        # تحميل البيانات الحالية
         sheets_data = load_production_data()
+        
+        # تحديث الـ DataFrame المطلوب
         sheets_data[sheet_name] = updated_df
         
         # حفظ تلقائي مع رسالة مخصصة
-        commit_message = f"تحديث تلقائي: {sheet_name} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        commit_message = f"تحديث: {sheet_name} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         return save_production_data(sheets_data, commit_message)
     except Exception as e:
         st.error(f"❌ خطأ في تحديث البيانات: {e}")
@@ -464,18 +467,20 @@ def separate_mandatory_columns(all_columns):
     regular_cols = [col for col in all_columns if col not in APP_CONFIG["MANDATORY_COLUMNS"]]
     return mandatory_cols, regular_cols
 
-def detect_changes(original_df, edited_df):
-    """اكتشاف التغييرات بين DataFrame الأصلي والمعدل"""
+def detect_dataframe_changes(original_df, new_df):
+    """اكتشاف التغييرات بين داتافرام الأصلي والجديد"""
     try:
-        if original_df.shape != edited_df.shape:
+        # مقارنة الشكل
+        if original_df.shape != new_df.shape:
             return True
         
-        # تحويل جميع القيم إلى سلسلة للمقارنة
-        original_str = original_df.astype(str)
-        edited_str = edited_df.astype(str)
-        
-        return not original_str.equals(edited_str)
-    except:
+        # مقارنة القيم
+        if not original_df.equals(new_df):
+            return True
+            
+        return False
+    except Exception as e:
+        st.error(f"❌ خطأ في اكتشاف التغييرات: {e}")
         return True
 
 # -------------------------------
@@ -671,30 +676,28 @@ with tabs[1]:
         )
         
         if selected_sheet:
-            df = production_data[selected_sheet]
+            # تحميل البيانات الأصلية
+            original_df = production_data[selected_sheet]
             
             st.subheader(f"تعديل بيانات {selected_sheet}")
             
             # عرض حالة الحفظ التلقائي
             st.success("💾 الحفظ التلقائي مفعّل - سيتم حفظ جميع التغييرات تلقائياً على GitHub")
             
-            # استخدام محرر البيانات مع الحفظ التلقائي الفوري
-            st.info("💡 أي تغيير تقوم به سيتم حفظه تلقائياً على GitHub")
+            # استخدام محرر البيانات
+            st.info("💡 قم بإجراء التعديلات ثم اضغط على زر الحفظ")
             
             # فصل الأعمدة الإلزامية عن الأعمدة العادية
-            all_columns = list(df.columns)
+            all_columns = list(original_df.columns)
             mandatory_columns, regular_columns = separate_mandatory_columns(all_columns)
             
             # إعادة ترتيب الأعمدة لوضع الإلزامية أولاً
             ordered_columns = mandatory_columns + [col for col in all_columns if col not in mandatory_columns]
-            df_reordered = df[ordered_columns]
+            df_reordered = original_df[ordered_columns]
             
-            # تحويل جميع الأعمدة إلى نص لضمان قبول جميع أنواع المدخلات
-            df_for_edit = df_reordered.astype(str)
-            
-            # محرر البيانات مع الحفظ التلقائي
+            # محرر البيانات
             edited_df = st.data_editor(
-                df_for_edit,
+                df_reordered,
                 use_container_width=True,
                 height=500,
                 num_rows="dynamic",
@@ -703,56 +706,57 @@ with tabs[1]:
                     col: st.column_config.TextColumn(
                         col,
                         help=f"يمكنك إدخال أي نوع من البيانات في عمود {col}"
-                    ) for col in df_for_edit.columns
+                    ) for col in df_reordered.columns
                 }
             )
             
-            # استخدام زر لحفظ التغييرات بدلاً من الحفظ التلقائي الفوري
-            if st.button("💾 حفظ التغييرات على GitHub", type="primary", use_container_width=True):
-                if detect_changes(df_for_edit, edited_df):
-                    with st.spinner("جاري الحفظ على GitHub..."):
-                        success, commit_url = update_sheet_data(selected_sheet, edited_df)
-                        if success:
-                            st.success("✅ تم الحفظ بنجاح على GitHub")
-                            if commit_url:
-                                st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
-                            # تحديث البيانات المعروضة
-                            st.rerun()
-                        else:
-                            st.error("❌ فشل في الحفظ على GitHub")
-                else:
-                    st.info("⚠ لم يتم إجراء أي تغييرات للحفظ")
-            
+            # زر حفظ منفصل
             col1, col2 = st.columns(2)
             
             with col1:
+                if st.button("💾 حفظ التغييرات على GitHub", type="primary", use_container_width=True):
+                    # التحقق من وجود تغييرات
+                    if detect_dataframe_changes(df_reordered, edited_df):
+                        with st.spinner("جاري الحفظ على GitHub..."):
+                            success, commit_url = update_sheet_data(selected_sheet, edited_df)
+                            if success:
+                                st.success("✅ تم الحفظ بنجاح على GitHub")
+                                if commit_url:
+                                    st.markdown(f"[📎 عرض التعديل على GitHub]({commit_url})")
+                                # تحديث البيانات المعروضة
+                                st.rerun()
+                            else:
+                                st.error("❌ فشل في الحفظ على GitHub")
+                    else:
+                        st.info("⚠ لم يتم إجراء أي تغييرات للحفظ")
+            
+            with col2:
                 if st.button("🔄 إعادة تحميل البيانات", use_container_width=True):
                     st.rerun()
             
-            with col2:
-                if st.button("📥 تصدير البيانات", use_container_width=True):
-                    buffer = io.BytesIO()
-                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                        edited_df.to_excel(writer, sheet_name=selected_sheet, index=False)
-                    
-                    st.download_button(
-                        label="تحميل كملف Excel",
-                        data=buffer.getvalue(),
-                        file_name=f"{selected_sheet}_{datetime.now().date()}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
+            # تصدير البيانات
+            if st.button("📥 تصدير البيانات الحالية", use_container_width=True):
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    edited_df.to_excel(writer, sheet_name=selected_sheet, index=False)
+                
+                st.download_button(
+                    label="تحميل كملف Excel",
+                    data=buffer.getvalue(),
+                    file_name=f"{selected_sheet}_{datetime.now().date()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
             
-            # إضافة صف جديد مع الحفظ التلقائي
+            # إضافة صف جديد
             st.subheader("➕ إضافة بيانات جديدة")
             with st.form(f"add_row_form_{selected_sheet}"):
-                st.write("املأ البيانات الجديدة (سيتم الحفظ تلقائياً):")
+                st.write("املأ البيانات الجديدة:")
                 new_row_data = {}
                 
                 # عرض الأعمدة الإلزامية أولاً (إذا كانت موجودة)
                 if mandatory_columns:
                     st.write("*الأعمدة الإلزامية:*")
-                    # التحقق من أن عدد الأعمدة الإلزامية أكبر من صفر قبل إنشاء الأعمدة
                     if len(mandatory_columns) > 0:
                         mandatory_cols = st.columns(len(mandatory_columns))
                         for i, column in enumerate(mandatory_columns):
@@ -767,9 +771,8 @@ with tabs[1]:
                 # عرض الأعمدة العادية (إذا كانت موجودة)
                 if regular_columns:
                     st.write("*الأعمدة الإضافية:*")
-                    # استخدام أعمدة متعددة للأعمدة العادية (4 أعمدة لكل صف)
                     num_regular_cols = len(regular_columns)
-                    num_rows = (num_regular_cols + 3) // 4  # حساب عدد الصفوف المطلوبة
+                    num_rows = (num_regular_cols + 3) // 4
                     
                     for row in range(num_rows):
                         start_idx = row * 4

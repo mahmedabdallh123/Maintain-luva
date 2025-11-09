@@ -40,7 +40,10 @@ APP_CONFIG = {
     "CUSTOM_TABS": ["📊 عرض المحطات", "✏ تعديل البيانات", "👥 إدارة المستخدمين", "📞 الدعم الفني"],
     
     # إعدادات الحفظ التلقائي
-    "AUTO_SAVE": True  # تفعيل الحفظ التلقائي افتراضياً
+    "AUTO_SAVE": True,  # تفعيل الحفظ التلقائي افتراضياً
+    
+    # الأعمدة الإلزامية التي يجب أن تظهر دائماً
+    "MANDATORY_COLUMNS": ["الحدث", "التصحيح الفني", "التاريخ"]
 }
 
 # ===============================
@@ -262,7 +265,7 @@ def get_file_from_github():
         st.error(f"خطأ: {str(e)}")
         return None, None, None
 
-def save_file_to_github(df_dict, sha, commit_message):
+def save_file_to_github(file_content, sha, commit_message):
     """حفظ الملف إلى GitHub"""
     try:
         repo_parts = APP_CONFIG["REPO_NAME"].split('/')
@@ -273,13 +276,7 @@ def save_file_to_github(df_dict, sha, commit_message):
         repo_owner, repo_name = repo_parts
         url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{APP_CONFIG['PRODUCTION_FILE_PATH']}"
         
-        # تحويل جميع DataFrames إلى Excel في الذاكرة
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            for sheet_name, df in df_dict.items():
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
-        
-        content_base64 = base64.b64encode(output.getvalue()).decode()
+        content_base64 = base64.b64encode(file_content).decode()
         
         github_token = os.getenv('GITHUB_TOKEN')
         
@@ -298,10 +295,10 @@ def save_file_to_github(df_dict, sha, commit_message):
         
         response = requests.put(url, json=data, headers=headers, timeout=30)
         
-        if response.status_code == 200:
+        if response.status_code == 200 or response.status_code == 201:
             return True, response.json()['commit']['html_url']
         else:
-            st.error(f"خطأ في الحفظ: {response.status_code}")
+            st.error(f"خطأ في الحفظ: {response.status_code} - {response.text}")
             return False, None
             
     except Exception as e:
@@ -387,8 +384,12 @@ def save_production_data(sheets_data, commit_message="تحديث بيانات م
         # الحفظ على GitHub إذا كان هناك token
         github_token = os.getenv('GITHUB_TOKEN')
         if github_token and 'file_sha' in st.session_state:
+            # قراءة الملف المحفوظ حديثاً وإرساله إلى GitHub
+            with open(APP_CONFIG["LOCAL_PRODUCTION_FILE"], "rb") as f:
+                file_content = f.read()
+            
             success, commit_url = save_file_to_github(
-                sheets_data,
+                file_content,
                 st.session_state.file_sha,
                 commit_message
             )
@@ -439,6 +440,12 @@ def create_backup():
     except Exception as e:
         st.error(f"❌ خطأ في إنشاء النسخة الاحتياطية: {e}")
         return None
+
+def separate_mandatory_columns(all_columns):
+    """فصل الأعمدة الإلزامية عن الأعمدة العادية"""
+    mandatory_cols = [col for col in APP_CONFIG["MANDATORY_COLUMNS"] if col in all_columns]
+    regular_cols = [col for col in all_columns if col not in APP_CONFIG["MANDATORY_COLUMNS"]]
+    return mandatory_cols, regular_cols
 
 # -------------------------------
 # 🖥 الواجهة الرئيسية
@@ -542,8 +549,9 @@ with tabs[0]:
             # قسم تخصيص الأعمدة
             st.subheader("🎛 تخصيص الأعمدة المعروضة")
             
-            # الحصول على جميع الأعمدة المتاحة
+            # فصل الأعمدة الإلزامية عن الأعمدة العادية
             all_columns = list(df.columns)
+            mandatory_columns, regular_columns = separate_mandatory_columns(all_columns)
             
             # خيارات التخصيص
             col1, col2, col3 = st.columns(3)
@@ -559,8 +567,8 @@ with tabs[0]:
             with col3:
                 # خيار إعادة التعيين
                 if st.button("🔄 إعادة تعيين", use_container_width=True):
-                    if 'selected_columns' in st.session_state:
-                        del st.session_state.selected_columns
+                    if 'selected_regular_columns' in st.session_state:
+                        del st.session_state.selected_regular_columns
                     st.rerun()
             
             # تحديد الأعمدة المطلوبة للعرض
@@ -568,21 +576,27 @@ with tabs[0]:
                 display_columns = all_columns
                 st.info("🔍 يتم عرض جميع الأعمدة")
             elif custom_columns:
-                # اختيار الأعمدة المطلوبة
-                selected_columns = st.multiselect(
-                    "📋 اختر الأعمدة للعرض:",
-                    options=all_columns,
-                    default=all_columns[:min(5, len(all_columns))] if 'selected_columns' not in st.session_state else st.session_state.selected_columns,
+                # اختيار الأعمدة العادية المطلوبة (الأعمدة الإلزامية ستضاف تلقائياً)
+                selected_regular_columns = st.multiselect(
+                    "📋 اختر الأعمدة الإضافية للعرض:",
+                    options=regular_columns,
+                    default=regular_columns[:min(5, len(regular_columns))] if 'selected_regular_columns' not in st.session_state else st.session_state.selected_regular_columns,
                     key="column_selector"
                 )
-                display_columns = selected_columns
-                st.session_state.selected_columns = selected_columns
+                
+                # دمج الأعمدة الإلزامية مع الأعمدة المختارة
+                display_columns = mandatory_columns + selected_regular_columns
+                st.session_state.selected_regular_columns = selected_regular_columns
                 
                 if not display_columns:
                     st.warning("⚠ لم تختر أي أعمدة للعرض. سيتم عرض جميع الأعمدة.")
                     display_columns = all_columns
                 else:
-                    st.success(f"✅ سيتم عرض {len(display_columns)} عمود من أصل {len(all_columns)}")
+                    st.success(f"✅ سيتم عرض {len(display_columns)} عمود ({len(mandatory_columns)} إلزامي + {len(selected_regular_columns)} اختياري)")
+                    
+                    # عرض معلومات عن الأعمدة الإلزامية
+                    if mandatory_columns:
+                        st.info(f"📌 الأعمدة الإلزامية الظاهرة دائماً: {', '.join(mandatory_columns)}")
             else:
                 display_columns = all_columns
             
@@ -597,7 +611,11 @@ with tabs[0]:
             
             # عرض البيانات مع الأعمدة المحددة فقط
             if display_columns:
-                st.dataframe(df[display_columns], use_container_width=True, height=400)
+                # إعادة ترتيب الأعمدة لوضع الإلزامية أولاً
+                ordered_columns = [col for col in display_columns if col in mandatory_columns] + \
+                                [col for col in display_columns if col not in mandatory_columns]
+                
+                st.dataframe(df[ordered_columns], use_container_width=True, height=400)
             else:
                 st.warning("⚠ لا توجد أعمدة محددة للعرض.")
 
@@ -628,8 +646,16 @@ with tabs[1]:
             # استخدام محرر البيانات مع الحفظ التلقائي الفوري
             st.info("💡 أي تغيير تقوم به سيتم حفظه تلقائياً على GitHub")
             
+            # فصل الأعمدة الإلزامية عن الأعمدة العادية
+            all_columns = list(df.columns)
+            mandatory_columns, regular_columns = separate_mandatory_columns(all_columns)
+            
+            # إعادة ترتيب الأعمدة لوضع الإلزامية أولاً
+            ordered_columns = mandatory_columns + [col for col in all_columns if col not in mandatory_columns]
+            df_reordered = df[ordered_columns]
+            
             # تحويل جميع الأعمدة إلى نص لضمان قبول جميع أنواع المدخلات
-            df_for_edit = df.astype(str)
+            df_for_edit = df_reordered.astype(str)
             
             # محرر البيانات مع الحفظ التلقائي
             edited_df = st.data_editor(
@@ -684,12 +710,25 @@ with tabs[1]:
             with st.form(f"add_row_form_{selected_sheet}"):
                 st.write("املأ البيانات الجديدة (سيتم الحفظ تلقائياً):")
                 new_row_data = {}
-                cols = st.columns(min(4, len(df.columns)))
                 
-                for i, column in enumerate(df.columns):
+                # عرض الأعمدة الإلزامية أولاً
+                st.write("*الأعمدة الإلزامية:*")
+                mandatory_cols = st.columns(len(mandatory_columns))
+                for i, column in enumerate(mandatory_columns):
+                    with mandatory_cols[i]:
+                        new_row_data[column] = st.text_input(
+                            f"{column}:",
+                            value="",
+                            key=f"new_{column}_{selected_sheet}",
+                            help=f"أدخل أي قيمة لـ {column}"
+                        )
+                
+                # عرض الأعمدة العادية
+                st.write("*الأعمدة الإضافية:*")
+                regular_cols = st.columns(min(4, len(regular_columns)))
+                for i, column in enumerate(regular_columns):
                     col_idx = i % 4
-                    with cols[col_idx]:
-                        # استخدام حقل نصي لجميع الأعمدة للسماح بجميع أنواع المدخلات
+                    with regular_cols[col_idx]:
                         new_row_data[column] = st.text_input(
                             f"{column}:",
                             value="",
@@ -699,6 +738,11 @@ with tabs[1]:
                 
                 if st.form_submit_button("إضافة صف جديد", use_container_width=True):
                     if any(new_row_data.values()):
+                        # التأكد من أن جميع الأعمدة موجودة في البيانات الجديدة
+                        for col in ordered_columns:
+                            if col not in new_row_data:
+                                new_row_data[col] = ""
+                        
                         new_df = pd.concat([edited_df, pd.DataFrame([new_row_data])], ignore_index=True)
                         with st.spinner("جاري إضافة الصف والحفظ على GitHub..."):
                             success, commit_url = update_sheet_data(selected_sheet, new_df)
@@ -795,6 +839,7 @@ with tabs[3]:
     - ✅ دعم كامل للغة العربية
     - ✅ إدارة مستخدمين متعددة
     - ✅ نسخ احتياطي تلقائي
+    - ✅ الأعمدة الإلزامية (الحدث، التصحيح الفني، التاريخ) تظهر دائماً
     """)
     
     # أزرار فنية
@@ -820,6 +865,11 @@ with footer_col3:
 
 # تهيئة session state إذا لزم الأمر
 if 'file_sha' not in st.session_state:
-    st.session_state.file_sha = None
-if 'file_url' not in st.session_state:
-    st.session_state.file_url = None
+    # محاولة جلب SHA من GitHub عند بدء التشغيل
+    file_content, file_sha, file_url = get_file_from_github()
+    if file_sha:
+        st.session_state.file_sha = file_sha
+        st.session_state.file_url = file_url
+    else:
+        st.session_state.file_sha = None
+        st.session_state.file_url = None

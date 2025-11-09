@@ -711,30 +711,42 @@ with tabs[1]:
                 st.write("املأ البيانات الجديدة (سيتم الحفظ تلقائياً):")
                 new_row_data = {}
                 
-                # عرض الأعمدة الإلزامية أولاً
-                st.write("*الأعمدة الإلزامية:*")
-                mandatory_cols = st.columns(len(mandatory_columns))
-                for i, column in enumerate(mandatory_columns):
-                    with mandatory_cols[i]:
-                        new_row_data[column] = st.text_input(
-                            f"{column}:",
-                            value="",
-                            key=f"new_{column}_{selected_sheet}",
-                            help=f"أدخل أي قيمة لـ {column}"
-                        )
+                # عرض الأعمدة الإلزامية أولاً (إذا كانت موجودة)
+                if mandatory_columns:
+                    st.write("*الأعمدة الإلزامية:*")
+                    # التحقق من أن عدد الأعمدة الإلزامية أكبر من صفر قبل إنشاء الأعمدة
+                    if len(mandatory_columns) > 0:
+                        mandatory_cols = st.columns(len(mandatory_columns))
+                        for i, column in enumerate(mandatory_columns):
+                            with mandatory_cols[i]:
+                                new_row_data[column] = st.text_input(
+                                    f"{column}:",
+                                    value="",
+                                    key=f"new_{column}_{selected_sheet}",
+                                    help=f"أدخل أي قيمة لـ {column}"
+                                )
                 
-                # عرض الأعمدة العادية
-                st.write("*الأعمدة الإضافية:*")
-                regular_cols = st.columns(min(4, len(regular_columns)))
-                for i, column in enumerate(regular_columns):
-                    col_idx = i % 4
-                    with regular_cols[col_idx]:
-                        new_row_data[column] = st.text_input(
-                            f"{column}:",
-                            value="",
-                            key=f"new_{column}_{selected_sheet}",
-                            help=f"أدخل أي قيمة لـ {column}"
-                        )
+                # عرض الأعمدة العادية (إذا كانت موجودة)
+                if regular_columns:
+                    st.write("*الأعمدة الإضافية:*")
+                    # استخدام أعمدة متعددة للأعمدة العادية (4 أعمدة لكل صف)
+                    num_regular_cols = len(regular_columns)
+                    num_rows = (num_regular_cols + 3) // 4  # حساب عدد الصفوف المطلوبة
+                    
+                    for row in range(num_rows):
+                        start_idx = row * 4
+                        end_idx = min(start_idx + 4, num_regular_cols)
+                        current_cols = st.columns(end_idx - start_idx)
+                        
+                        for i, col_idx in enumerate(range(start_idx, end_idx)):
+                            column = regular_columns[col_idx]
+                            with current_cols[i]:
+                                new_row_data[column] = st.text_input(
+                                    f"{column}:",
+                                    value="",
+                                    key=f"new_{column}{selected_sheet}{row}_{i}",
+                                    help=f"أدخل أي قيمة لـ {column}"
+                                )
                 
                 if st.form_submit_button("إضافة صف جديد", use_container_width=True):
                     if any(new_row_data.values()):

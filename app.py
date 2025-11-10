@@ -524,7 +524,8 @@ permissions = get_user_permissions(None, None)
 tabs = st.tabs(APP_CONFIG["CUSTOM_TABS"])
 
 # -------------------------------
-# Tab 1: عرض المحطات مع تخصيص الأعمدة
+# -------------------------------
+# Tab 1: عرض المحطات مع تخصيص الأعمدة - معدل
 # -------------------------------
 with tabs[0]:
     st.header("📊 عرض بيانات المحطات")
@@ -544,15 +545,15 @@ with tabs[0]:
             
             st.subheader(f"بيانات {selected_sheet}")
             
-            # قسم تخصيص الأعمدة
+            # قسم تخصيص الأعمدة - معدل
             st.subheader("🎛 تخصيص الأعمدة المعروضة")
             
             # فصل الأعمدة الإلزامية عن الأعمدة العادية
             all_columns = list(df.columns)
             mandatory_columns, regular_columns = separate_mandatory_columns(all_columns)
             
-            # خيارات التخصيص
-            col1, col2, col3 = st.columns(3)
+            # خيارات التخصيص - تصميم جديد
+            col1, col2, col3 = st.columns([2, 1, 1])
             
             with col1:
                 # خيار عرض جميع الأعمدة
@@ -560,7 +561,7 @@ with tabs[0]:
             
             with col2:
                 # خيار تخصيص الأعمدة يدوياً
-                custom_columns = st.checkbox("تخصيص الأعمدة المحددة", value=False, key="custom_cols")
+                custom_columns = st.checkbox("تخصيص الأعمدة", value=False, key="custom_cols")
             
             with col3:
                 # خيار إعادة التعيين
@@ -569,18 +570,30 @@ with tabs[0]:
                         del st.session_state.selected_regular_columns
                     st.rerun()
             
-            # تحديد الأعمدة المطلوبة للعرض
+            # تحديد الأعمدة المطلوبة للعرض - تصميم جديد
             if show_all_columns:
                 display_columns = all_columns
-                st.info("🔍 يتم عرض جميع الأعمدة")
+                st.success("🔍 يتم عرض جميع الأعمدة")
             elif custom_columns:
-                # اختيار الأعمدة العادية المطلوبة (الأعمدة الإلزامية ستضاف تلقائياً)
+                # تصميم جديد: عرض الأعمدة في مربع منسدل مع خيارات متعددة
+                st.markdown("📋 اختر الأعمدة الإضافية للعرض:")
+                
+                # إنشاء قائمة بالأعمدة المتاحة مع تنسيق أفضل
+                column_options = {col: col for col in regular_columns}
+                
+                # استخدام multiselect مع تحسينات في الواجهة
                 selected_regular_columns = st.multiselect(
-                    "📋 اختر الأعمدة الإضافية للعرض:",
+                    "الأعمدة المتاحة:",
                     options=regular_columns,
                     default=regular_columns[:min(5, len(regular_columns))] if 'selected_regular_columns' not in st.session_state else st.session_state.selected_regular_columns,
-                    key="column_selector"
+                    key="column_selector",
+                    placeholder="اختر الأعمدة التي تريد عرضها...",
+                    label_visibility="collapsed"
                 )
+                
+                # معلومات عن الاختيار
+                if selected_regular_columns:
+                    st.info(f"✅ تم اختيار {len(selected_regular_columns)} أعمدة إضافية")
                 
                 # دمج الأعمدة الإلزامية مع الأعمدة المختارة
                 display_columns = mandatory_columns + selected_regular_columns
@@ -590,22 +603,38 @@ with tabs[0]:
                     st.warning("⚠ لم تختر أي أعمدة للعرض. سيتم عرض جميع الأعمدة.")
                     display_columns = all_columns
                 else:
-                    st.success(f"✅ سيتم عرض {len(display_columns)} عمود ({len(mandatory_columns)} إلزامي + {len(selected_regular_columns)} اختياري)")
+                    # عرض ملخص عن الأعمدة المختارة
+                    col_info1, col_info2 = st.columns(2)
+                    with col_info1:
+                        st.metric("الأعمدة الإلزامية", len(mandatory_columns))
+                    with col_info2:
+                        st.metric("الأعمدة المختارة", len(selected_regular_columns))
                     
-                    # عرض معلومات عن الأعمدة الإلزامية
-                    if mandatory_columns:
-                        st.info(f"📌 الأعمدة الإلزامية الظاهرة دائماً: {', '.join(mandatory_columns)}")
+                    # عرض الأعمدة المختارة
+                    with st.expander("📋 الأعمدة المحددة للعرض"):
+                        if mandatory_columns:
+                            st.write("*الأعمدة الإلزامية:*")
+                            for col in mandatory_columns:
+                                st.write(f"• {col}")
+                        
+                        if selected_regular_columns:
+                            st.write("*الأعمدة المختارة:*")
+                            for col in selected_regular_columns:
+                                st.write(f"• {col}")
             else:
                 display_columns = all_columns
             
             # عرض معلومات عن الشيت
-            col1, col2, col3 = st.columns(3)
+            st.markdown("---")
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("عدد الصفوف", len(df))
+                st.metric("📊 عدد الصفوف", len(df))
             with col2:
-                st.metric("عدد الأعمدة", len(display_columns))
+                st.metric("📈 عدد الأعمدة", len(display_columns))
             with col3:
-                st.metric("إجمالي البيانات", df[display_columns].count().sum() if display_columns else 0)
+                st.metric("🔢 إجمالي البيانات", df[display_columns].count().sum() if display_columns else 0)
+            with col4:
+                st.metric("📋 إجمالي الأعمدة المتاحة", len(all_columns))
             
             # عرض البيانات مع الأعمدة المحددة فقط
             if display_columns:
@@ -613,7 +642,24 @@ with tabs[0]:
                 ordered_columns = [col for col in display_columns if col in mandatory_columns] + \
                                 [col for col in display_columns if col not in mandatory_columns]
                 
-                st.dataframe(df[ordered_columns], use_container_width=True, height=400)
+                # عرض البيانات مع تنسيق محسن
+                st.subheader("📄 البيانات المعروضة")
+                st.dataframe(
+                    df[ordered_columns], 
+                    use_container_width=True, 
+                    height=400,
+                    hide_index=True
+                )
+                
+                # خيارات إضافية للبيانات
+                col_d1, col_d2 = st.columns(2)
+                with col_d1:
+                    if st.button("📥 تصدير البيانات المعروضة", use_container_width=True):
+                        # كود التصدير هنا
+                        pass
+                with col_d2:
+                    if st.button("🖨 طباعة العرض", use_container_width=True):
+                        st.info("⏳ سيتم تفعيل خاصية الطباعة قريباً")
             else:
                 st.warning("⚠ لا توجد أعمدة محددة للعرض.")
 
